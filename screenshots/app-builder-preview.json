@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "Sweet Care Crush",
+      "hasCanvas": false,
+      "bodyTextLen": 72,
+      "bodyTextHash": "f854d5ac764a023a1d27ad01cc0b03fafdb4be4362107263033f661bd955b4eb",
+      "bodyTextPrefix": "Match the sweets. Mend the ward. 0/45 Play level 1 World map How",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "Sweet Care Crush",
+      "hasCanvas": false,
+      "bodyTextLen": 72,
+      "bodyTextHash": "f854d5ac764a023a1d27ad01cc0b03fafdb4be4362107263033f661bd955b4eb",
+      "bodyTextPrefix": "Match the sweets. Mend the ward. 0/45 Play level 1 World map How",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}
