@@ -63,7 +63,7 @@ import {
   unlockAudio,
 } from "@/game/audio";
 import { cardForLevel, rememberGift } from "@/game/cards";
-import { continueLevel, loadSave, recordWin, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
+import { continueLevel, loadSave, recordWin, rememberOpened, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
 import { LiquidBoard, type LiquidHandle } from "@/components/LiquidBoard";
 import { ParticleLayer, type ParticleHandle } from "@/components/ParticleLayer";
 
@@ -328,6 +328,7 @@ export function SweetCare() {
             accessory: next.career.accessory,
           },
           gifts: next.gifts ?? disk.gifts,
+          openedGifts: next.openedGifts ?? disk.openedGifts,
         };
         diskRef.current = stored;
         writeSave(stored);
@@ -371,7 +372,11 @@ export function SweetCare() {
 
   function collectGift(levelId: number) {
     const card = cardForLevel(levelId);
-    patchSave((prev) => ({ ...prev, gifts: rememberGift(prev.gifts, card.id) }), "settings");
+    patchSave((prev) => ({
+      ...prev,
+      gifts: rememberGift(prev.gifts, card.id),
+      openedGifts: rememberOpened(prev.openedGifts, levelId),
+    }), "settings");
   }
 
   function openProfile() {
@@ -918,7 +923,7 @@ export function SweetCare() {
           }}
         />
       ) : null}
-      {screen === "map" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} /> : null}
+      {screen === "map" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} /> : null}
       {screen === "help" ? <Help onBack={() => setScreen("settings")} /> : null}
       {screen === "settings" ? (
         <Settings save={save} onBack={() => setScreen("home")} onSound={toggleSound} onMusic={toggleMusic} onHelp={() => { sfxClick(); setScreen("help"); }} />
@@ -1083,11 +1088,13 @@ function Settings({ save, onBack, onSound, onMusic, onHelp }: { save: SaveData; 
   );
 }
 
-function MapScreen({ save, onBack, onPick }: { save: SaveData; onBack: () => void; onPick: (id: number) => void }) {
+function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack: () => void; onPick: (id: number) => void; onCollect: (levelId: number) => void }) {
   const nextId = continueLevel(save);
   const next = getLevel(nextId);
   const spot = MAP_SPOTS.find((item) => item.id === nextId) ?? MAP_SPOTS[0]!;
   const [zoomed, setZoomed] = useState(true);
+  const [opening, setOpening] = useState<number | null>(null);
+  const opened = save.openedGifts ?? [];
   return (
     <div className="column map">
       <div className="map-head">
@@ -1110,10 +1117,25 @@ function MapScreen({ save, onBack, onPick }: { save: SaveData; onBack: () => voi
               </button>
             );
           })}
+          {MAP_SPOTS.map((pin) => {
+            const stars = save.stars[String(pin.id)] ?? 0;
+            if (stars < 1 || opened.includes(pin.id)) return null;
+            return (
+              <button key={`gift-${pin.id}`} type="button" className="pin-gift" style={{ left: `${pin.x}%`, top: `${pin.y}%` }} aria-label={`Open secret gift for level ${pin.id}`} onClick={() => {
+                unlockAudio();
+                sfxGift(pin.id);
+                onCollect(pin.id);
+                setOpening(pin.id);
+              }}>
+                <GiftBox />
+              </button>
+            );
+          })}
           <img className="traveler" src={portrait(save.career)} alt="" style={{ left: `${spot.x}%`, top: `${spot.y}%` }} />
         </IslandCamera>
         <p className="map-caption">{zoomed ? `Next · ${next.name}` : "Pick a ward"}</p>
       </div>
+      {opening != null ? <CardReveal levelId={opening} onClose={() => setOpening(null)} /> : null}
     </div>
   );
 }
@@ -1475,33 +1497,21 @@ function Fireworks() {
   );
 }
 
-const GIFT_SPOTS = [
-  { left: 4, top: 4 },
-  { left: 62, top: 3 },
-  { left: 8, top: 22 },
-  { left: 58, top: 20 },
-  { left: 28, top: 2 },
-  { left: 44, top: 16 },
-];
-
-function GiftDrop({ onOpen }: { onOpen: () => void }) {
-  const [spot] = useState(() => {
-    const pick = GIFT_SPOTS[Math.floor(Math.random() * GIFT_SPOTS.length)]!;
-    return {
-      left: Math.min(68, pick.left + Math.floor(Math.random() * 8)),
-      top: Math.min(36, pick.top + Math.floor(Math.random() * 6)),
-    };
-  });
+function GiftBox() {
   return (
-    <button
-      className="present-btn roam"
-      type="button"
-      style={{ left: `${spot.left}%`, top: `${spot.top}%` }}
-      onClick={onOpen}
-      aria-label="Open secret item"
-    >
-      <img src="/ui/present.png" alt="" />
-      <span className="secret-kicker">Open</span>
+    <span className="present" aria-hidden>
+      <span className="present-box" />
+      <span className="present-lid" />
+      <span className="present-bow" />
+    </span>
+  );
+}
+
+function SecretGiftButton({ onOpen }: { onOpen: () => void }) {
+  return (
+    <button className="present-btn claim" type="button" onClick={onOpen} aria-label="Open secret gift">
+      <span className="claim-gift"><GiftBox /></span>
+      <span className="secret-kicker">Secret gift</span>
     </button>
   );
 }
@@ -1540,30 +1550,19 @@ function Outro({
   onCollect: (levelId: number) => void;
 }) {
   const won = model.outcome === "win";
-  const [giftPhase, setGiftPhase] = useState<"wait" | "flash" | "box" | "open" | "kept">("wait");
-  useEffect(() => {
-    if (!won) return;
-    const flash = window.setTimeout(() => setGiftPhase((phase) => (phase === "wait" ? "flash" : phase)), 3000);
-    const box = window.setTimeout(() => setGiftPhase((phase) => (phase === "flash" || phase === "wait" ? "box" : phase)), 3600);
-    return () => {
-      window.clearTimeout(flash);
-      window.clearTimeout(box);
-    };
-  }, [won, model.level.id]);
+  const pending = won && !(save.openedGifts ?? []).includes(model.level.id);
+  const [giftPhase, setGiftPhase] = useState<"box" | "open" | "kept">(pending ? "box" : "kept");
   const openGift = () => {
     unlockAudio();
     sfxGift(model.level.id);
     setGiftPhase("open");
     onCollect(model.level.id);
   };
-  const flash = giftPhase === "flash" ? (
-    <div className="secret-pop" role="status"><span className="cheer-flash" /><b>Secret item unlocked</b></div>
-  ) : null;
-  const present = giftPhase === "box" ? <GiftDrop onOpen={openGift} /> : null;
+  const present = giftPhase === "box" ? <SecretGiftButton onOpen={openGift} /> : null;
   const reveal = giftPhase === "open" ? <CardReveal levelId={model.level.id} onClose={() => setGiftPhase("kept")} /> : null;
   if (model.curtain !== "next") {
     return (
-      <div className="outro card-hold">
+      <div className={present ? "outro card-hold has-gift" : "outro card-hold"}>
         {won ? <Confetti /> : null}
         <div className="modal summary" role="dialog" aria-label={won ? "Level summary" : "Out of moves"}>
           {won ? <Cheer career={save.career} /> : <DocAvatar career={save.career} className="cheer" />}
@@ -1582,7 +1581,6 @@ function Outro({
             </div>
           </div>
           {model.badges.length > 0 ? <BadgeFlash badges={model.badges} /> : <p className="summary-note">No badges this round.</p>}
-          {flash}
           <button className="btn" type="button" onClick={onAdvance}>Next</button>
         </div>
         {present}

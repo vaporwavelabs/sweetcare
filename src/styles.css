@@ -1029,6 +1029,20 @@
   padding: 0.55rem 0.85rem 0.65rem;
 }
 
+.card-hold {
+  overflow: hidden;
+}
+
+.card-hold .summary {
+  min-height: 0;
+  flex: 0 1 auto;
+  max-height: calc(100% - 0.4rem);
+}
+
+.card-hold.has-gift .summary {
+  max-height: calc(100% - 5.8rem);
+}
+
 .summary h2 {
   font-size: 1.55rem;
   margin: 0.05rem 0 0.15rem;
@@ -1040,8 +1054,8 @@
 
 .summary .doc.cheer,
 .summary .doc.cheer.look-f {
-  width: min(18rem, 88vw);
-  height: min(22rem, 52vh);
+  width: min(14rem, 72vw);
+  height: min(14rem, 30vh);
   margin: 0 auto 0.1rem;
   background: #fff;
 }
@@ -1061,6 +1075,7 @@
   margin-top: 0.45rem;
   position: sticky;
   bottom: 0;
+  z-index: 6;
 }
 
 .summary-score {
@@ -2140,6 +2155,84 @@ button.outro {
   animation: none;
 }
 
+.present-btn.claim {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: min(100%, 18rem);
+  flex: none;
+  margin: 0.45rem 0 0.15rem;
+  padding: 0.15rem 0.75rem 0.15rem 0.2rem;
+  border: 0;
+  border-radius: 1rem;
+  background: #fff4c8;
+  color: #7a2a00;
+  box-shadow: 0 0.2rem 0 #e0a020;
+  position: relative;
+  z-index: 5;
+  animation: badgePop 0.45s cubic-bezier(0.15, 1.45, 0.32, 1) both;
+}
+
+.outro.after .present-btn.claim {
+  margin-top: 0.15rem;
+}
+
+.claim-gift {
+  width: 3.1rem;
+  height: 2.8rem;
+  display: grid;
+  place-items: center;
+  flex: none;
+  overflow: hidden;
+}
+
+.claim-gift .present {
+  animation: none;
+  transform: scale(0.66);
+}
+
+.present-btn.claim .secret-kicker {
+  position: static;
+  transform: none;
+  background: transparent;
+  color: #7a2a00;
+  padding: 0;
+  font-size: 1.2rem;
+  animation: none;
+}
+
+.pin-gift {
+  position: absolute;
+  z-index: 4;
+  width: 2rem;
+  height: 2rem;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0.45rem;
+  background: transparent;
+  transform: translate(-50%, -155%);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  cursor: pointer;
+  filter: drop-shadow(0 0.12rem 0.05rem rgba(40, 20, 0, 0.45));
+}
+
+.pin-gift .present {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: 0;
+  animation: giftBob 1.05s ease-in-out infinite;
+}
+
+@keyframes giftBob {
+  0%, 100% { transform: translate(-50%, -50%) scale(0.44); }
+  50% { transform: translate(-50%, -62%) scale(0.48); }
+}
+
 .secret-kicker {
   font-size: 0.95rem;
   background: #ffe56a;
@@ -2419,6 +2512,9 @@ button.outro {
   .secret-pop b,
   .secret-kicker,
   .present,
+  .present-btn.claim,
+  .pin-gift,
+  .pin-gift .present,
   .fireworks i,
   .card-reveal img {
     animation: none;

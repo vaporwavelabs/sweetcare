@@ -10,12 +10,20 @@ export interface SaveData {
   music: boolean;
   career: Career;
   gifts: string[];
+  /** Level ids whose secret gift was opened. */
+  openedGifts: number[];
 }
 
 const KEY = "sweet-care-save-v1";
 
 export function defaultSave(): SaveData {
-  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, career: defaultCareer(), gifts: [] };
+  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, career: defaultCareer(), gifts: [], openedGifts: [] };
+}
+
+export function rememberOpened(opened: number[] | undefined, levelId: number): number[] {
+  const next = opened ? [...opened] : [];
+  if (!next.includes(levelId)) next.push(levelId);
+  return next;
 }
 
 export function loadSave(): SaveData {
@@ -40,6 +48,9 @@ export function loadSave(): SaveData {
         look: parsed.career?.look === "f" ? "f" : "m",
       },
       gifts: Array.isArray(parsed.gifts) ? parsed.gifts.filter((id) => typeof id === "string") : [],
+      openedGifts: Array.isArray(parsed.openedGifts)
+        ? parsed.openedGifts.filter((id) => typeof id === "number" && id >= 1 && id <= 15)
+        : [],
     };
   } catch {
     return defaultSave();
