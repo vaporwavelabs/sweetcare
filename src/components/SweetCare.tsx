@@ -625,11 +625,11 @@ export function SweetCare() {
       cleared,
     );
     model.rankedUp = applied.rankedUp;
-    model.savedNow = won && model.level.id % 5 === 0;
+    model.savedNow = won;
     patchSave((current) => {
       const base = won ? recordWin(current, model.level.id, model.stars, model.score, elapsed) : current;
       return { ...base, career: applied.career };
-    }, model.savedNow ? "checkpoint" : "session");
+    }, won ? "checkpoint" : "session");
   }
 
   async function finish(run: number) {
@@ -1095,6 +1095,11 @@ function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack
   const [zoomed, setZoomed] = useState(true);
   const [opening, setOpening] = useState<number | null>(null);
   const opened = save.openedGifts ?? [];
+  const pendingGifts = MAP_SPOTS.filter((pin) => {
+    const stars = save.stars[String(pin.id)] ?? 0;
+    const finished = stars >= 1 || pin.id < save.unlocked;
+    return finished && !opened.includes(pin.id);
+  });
   return (
     <div className="column map">
       <div className="map-head">
@@ -1135,6 +1140,21 @@ function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack
         </IslandCamera>
         <p className="map-caption">{zoomed ? `Next · ${next.name}` : "Pick a ward"}</p>
       </div>
+      {pendingGifts.length > 0 ? (
+        <div className="map-gift-dock">
+          {pendingGifts.map((pin) => (
+            <button key={`dock-${pin.id}`} type="button" className="present-btn claim" aria-label={`Level ${pin.id} secret gift`} onClick={() => {
+              unlockAudio();
+              sfxGift(pin.id);
+              onCollect(pin.id);
+              setOpening(pin.id);
+            }}>
+              <span className="claim-gift"><GiftBox /></span>
+              <span className="secret-kicker">Level {pin.id} gift</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       {opening != null ? <CardReveal levelId={opening} onClose={() => setOpening(null)} /> : null}
     </div>
   );
@@ -1560,6 +1580,7 @@ function Outro({
   };
   const present = giftPhase === "box" ? <SecretGiftButton onOpen={openGift} /> : null;
   const reveal = giftPhase === "open" ? <CardReveal levelId={model.level.id} onClose={() => setGiftPhase("kept")} /> : null;
+  const dock = present ? <div className="gift-dock">{present}</div> : null;
   if (model.curtain !== "next") {
     return (
       <div className={present ? "outro card-hold has-gift" : "outro card-hold"}>
@@ -1583,20 +1604,19 @@ function Outro({
           {model.badges.length > 0 ? <BadgeFlash badges={model.badges} /> : <p className="summary-note">No badges this round.</p>}
           <button className="btn" type="button" onClick={onAdvance}>Next</button>
         </div>
-        {present}
+        {dock}
         {reveal}
       </div>
     );
   }
   return (
-    <div className="outro after">
+    <div className={present ? "outro after has-gift" : "outro after"}>
       <DocAvatar career={save.career} className="after-doc" />
       <h2>{won ? model.level.name : "Out of moves"}</h2>
       <Stars n={won ? model.stars : 0} />
       {model.savedNow ? (
-        <p className="save-banner">Progress saved. Game progress is stored every 5 levels.</p>
+        <p className="save-banner">Progress saved.</p>
       ) : null}
-      {present}
       <div className="stack">
         {won && model.level.id < 15 ? (
           <button className="btn" type="button" onClick={onNext}>Play next level</button>
@@ -1606,6 +1626,7 @@ function Outro({
         <button className="btn secondary" type="button" onClick={onProfile}>Profile</button>
         <button className="btn secondary" type="button" onClick={onHome}>Main menu</button>
       </div>
+      {dock}
       {reveal}
     </div>
   );
