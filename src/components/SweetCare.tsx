@@ -63,7 +63,9 @@ import {
   unlockAudio,
 } from "@/game/audio";
 import { cardForLevel, rememberGift } from "@/game/cards";
-import { continueLevel, loadSave, recordWin, rememberOpened, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
+import { generateWard } from "@/game/generator";
+import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
+import { shiftForDate } from "@/game/shifts";
 import { LiquidBoard, type LiquidHandle } from "@/components/LiquidBoard";
 import { ParticleLayer, type ParticleHandle } from "@/components/ParticleLayer";
 
@@ -423,9 +425,19 @@ export function SweetCare() {
     stopCelebration();
     const run = ++runRef.current;
     shuffles.current = 0;
-    const level = getLevel(id);
-    const rng = mulberry32((Date.now() ^ (id * 9973)) >>> 0);
+    const attempt = attemptFor(saveRef.current, id);
+    if (attempt.save !== saveRef.current) {
+      saveRef.current = attempt.save;
+      writeSave(attempt.save);
+      setSave(attempt.save);
+    }
+    const level = generateWard(id, attempt.seed, attempt.shiftId);
+    const rng = mulberry32(attempt.seed ^ (id * 9973));
     const board = createBoard(rng, level.rows, level.cols, level.kinds);
+    if (level.startSpecial) {
+      const mid = board[Math.floor(level.rows / 2)]?.[Math.floor(level.cols / 2)];
+      if (mid) mid.special = level.startSpecial;
+    }
     const jelly = makeJelly(level);
     const model: Model = {
       level,
@@ -627,7 +639,7 @@ export function SweetCare() {
     model.rankedUp = applied.rankedUp;
     model.savedNow = won;
     patchSave((current) => {
-      const base = won ? recordWin(current, model.level.id, model.stars, model.score, elapsed) : current;
+      const base = won ? releaseAttempt(recordWin(current, model.level.id, model.stars, model.score, elapsed), model.level.id) : current;
       return { ...base, career: applied.career };
     }, won ? "checkpoint" : "session");
   }
@@ -1034,6 +1046,16 @@ function Cast({
   );
 }
 
+
+function ShiftChip() {
+  const shift = shiftForDate();
+  return (
+    <p className="shift-chip" title={shift.blurb}>
+      Today's shift · {shift.label}
+    </p>
+  );
+}
+
 function Home({ save, onNew, onContinue, onMap, onSettings, onSound, onProfile }: { save: SaveData; onNew: () => void; onContinue: () => void; onMap: () => void; onSettings: () => void; onSound: () => void; onProfile: () => void }) {
   const played = save.unlocked > 1 || Object.values(save.stars).some((n) => n > 0);
   return (
@@ -1049,6 +1071,7 @@ function Home({ save, onNew, onContinue, onMap, onSettings, onSound, onProfile }
       </div>
       <div className="scroll">
         <p className="tagline">Match the sweets. Mend the ward.</p>
+        <ShiftChip />
         <p className="star-total home-stars">
           <Star className="star on" aria-hidden />
           {totalStars(save)}/45
@@ -1090,7 +1113,9 @@ function Settings({ save, onBack, onSound, onMusic, onHelp }: { save: SaveData; 
 
 function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack: () => void; onPick: (id: number) => void; onCollect: (levelId: number) => void }) {
   const nextId = continueLevel(save);
-  const next = getLevel(nextId);
+  const next = save.seeds[String(nextId)]
+    ? generateWard(nextId, save.seeds[String(nextId)]!, save.attemptShifts[String(nextId)] ?? shiftForDate().id)
+    : getLevel(nextId);
   const spot = MAP_SPOTS.find((item) => item.id === nextId) ?? MAP_SPOTS[0]!;
   const [zoomed, setZoomed] = useState(true);
   const [opening, setOpening] = useState<number | null>(null);
@@ -1107,6 +1132,7 @@ function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack
         <h2>World map</h2>
         <span className="star-total"><Star className="star on" aria-hidden />{totalStars(save)}</span>
       </div>
+      <ShiftChip />
       <button className="zoom-toggle" type="button" onClick={() => setZoomed((on) => !on)}>
         {zoomed ? "Whole island" : "Zoom to next"}
       </button>
@@ -1354,7 +1380,7 @@ function Play({
         <div className="level-slab">
           <b className="lvl-num">{model.level.id}</b>
           <div className="lvl-copy">
-            <div className="lvl-kicker">Level {model.level.id}</div>
+            <div className="lvl-kicker">{model.level.shiftLabel ?? "Level"} {model.level.boss ? `· ${model.level.boss}` : ""}</div>
             <div className="lvl-name">{model.level.name}</div>
             <div className="bar" aria-hidden><span style={{ width: `${Math.round(frac * 100)}%` }} /></div>
           </div>

@@ -1,4 +1,6 @@
 import { defaultCareer, type Career } from "./profile.ts";
+import { previewSeed } from "./generator.ts";
+import { dayKey, shiftForDate, type ShiftId } from "./shifts.ts";
 
 export interface SaveData {
   version: 1;
@@ -12,12 +14,18 @@ export interface SaveData {
   gifts: string[];
   /** Level ids whose secret gift was opened. */
   openedGifts: number[];
+  /** Stable board seed for an open attempt. Cleared on a win. */
+  seeds: Record<string, number>;
+  /** Shift snapshotted when the attempt started, so midnight does not reshuffle a retry. */
+  attemptShifts: Record<string, ShiftId>;
+  /** Clears since the last seed roll. Bumps the next seed. */
+  clears: Record<string, number>;
 }
 
 const KEY = "sweet-care-save-v1";
 
 export function defaultSave(): SaveData {
-  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, career: defaultCareer(), gifts: [], openedGifts: [] };
+  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {} };
 }
 
 export function rememberOpened(opened: number[] | undefined, levelId: number): number[] {
@@ -51,6 +59,9 @@ export function loadSave(): SaveData {
       openedGifts: Array.isArray(parsed.openedGifts)
         ? parsed.openedGifts.filter((id) => typeof id === "number" && id >= 1 && id <= 15)
         : [],
+      seeds: numberMap(parsed.seeds),
+      attemptShifts: shiftMap(parsed.attemptShifts),
+      clears: numberMap(parsed.clears),
     };
   } catch {
     return defaultSave();
@@ -60,6 +71,57 @@ export function loadSave(): SaveData {
 export function writeSave(save: SaveData) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(KEY, JSON.stringify(save));
+}
+
+function numberMap(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") return {};
+  const out: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === "number" && Number.isFinite(raw)) out[key] = raw >>> 0;
+  }
+  return out;
+}
+
+function shiftMap(value: unknown): Record<string, ShiftId> {
+  if (!value || typeof value !== "object") return {};
+  const allowed = new Set(["fully-staffed", "short-staffed", "float-pool", "supply-shortage", "in-service", "night-shift", "spill-risk", "visitor-hour"]);
+  const out: Record<string, ShiftId> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === "string" && allowed.has(raw)) out[key] = raw as ShiftId;
+  }
+  return out;
+}
+
+/** Opens or resumes an attempt. A retry keeps the seed. A clear releases it. */
+export function attemptFor(save: SaveData, levelId: number, now = new Date()) {
+  const key = String(levelId);
+  const existing = save.seeds[key];
+  if (existing) {
+    return { save, seed: existing, shiftId: save.attemptShifts[key] ?? shiftForDate(now).id };
+  }
+  const shift = shiftForDate(now);
+  const seed = previewSeed(levelId, dayKey(now), save.clears[key] ?? 0);
+  const next: SaveData = {
+    ...save,
+    seeds: { ...save.seeds, [key]: seed },
+    attemptShifts: { ...save.attemptShifts, [key]: shift.id },
+  };
+  return { save: next, seed, shiftId: shift.id };
+}
+
+/** Drop the open seed so the next visit rolls a new ward. */
+export function releaseAttempt(save: SaveData, levelId: number): SaveData {
+  const key = String(levelId);
+  const seeds = { ...save.seeds };
+  const attemptShifts = { ...save.attemptShifts };
+  delete seeds[key];
+  delete attemptShifts[key];
+  return {
+    ...save,
+    seeds,
+    attemptShifts,
+    clears: { ...save.clears, [key]: (save.clears[key] ?? 0) + 1 },
+  };
 }
 
 function clampLevel(n: number) {

@@ -95,6 +95,20 @@
   text-align: center;
 }
 
+.shift-chip {
+  margin: 0.55rem auto 0;
+  width: fit-content;
+  max-width: 92%;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(255, 248, 230, 0.16);
+  color: var(--color-cream);
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  text-align: center;
+}
+
 .tagline {
   margin: 0.85rem 0 0;
   text-align: center;

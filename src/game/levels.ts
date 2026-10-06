@@ -18,6 +18,12 @@ export interface LevelDef {
   star2: number;
   star3: number;
   jelly: JellyPattern;
+  /** Present on a rolled ward. Tutorial wards leave this empty. */
+  seed?: number;
+  shiftId?: string;
+  shiftLabel?: string;
+  boss?: string | null;
+  startSpecial?: "row" | "col" | "bomb" | "rainbow" | null;
 }
 
 const HOSPITAL: Kind[] = ["heart", "cross", "pill", "bandage", "nurse", "kit"];
