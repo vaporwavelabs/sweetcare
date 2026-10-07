@@ -14,16 +14,33 @@ function ensure(): AudioContext | null {
   if (typeof window === "undefined") return null;
   if (!ctx) {
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    ctx = new AC({ latencyHint: "interactive" });
-    master = ctx.createGain();
-    sfxBus = ctx.createGain();
-    musicBus = ctx.createGain();
-    sfxBus.connect(master);
-    musicBus.connect(master);
-    master.connect(ctx.destination);
-    master.gain.value = 1;
-    sfxBus.gain.value = 0.9;
-    musicBus.gain.value = 0.12;
+    if (!AC) return null;
+    try {
+      ctx = new AC({ latencyHint: "interactive" });
+    } catch {
+      try {
+        ctx = new AC();
+      } catch {
+        return null;
+      }
+    }
+    try {
+      master = ctx.createGain();
+      sfxBus = ctx.createGain();
+      musicBus = ctx.createGain();
+      sfxBus.connect(master);
+      musicBus.connect(master);
+      master.connect(ctx.destination);
+      master.gain.value = 1;
+      sfxBus.gain.value = 0.9;
+      musicBus.gain.value = 0.12;
+    } catch {
+      ctx = null;
+      master = null;
+      sfxBus = null;
+      musicBus = null;
+      return null;
+    }
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && ctx && ctx.state === "suspended") void ctx.resume();
     });
@@ -32,15 +49,19 @@ function ensure(): AudioContext | null {
 }
 
 export function unlockAudio() {
-  const audio = ensure();
-  if (!audio) return;
-  if (audio.state === "suspended") void audio.resume().then(() => primeBites());
-  else primeBites();
-  if (!started) {
-    started = true;
-    musicTimer = setInterval(musicTick, 340);
+  try {
+    const audio = ensure();
+    if (!audio) return;
+    if (audio.state === "suspended") void audio.resume().then(() => primeBites()).catch(() => {});
+    else primeBites();
+    if (!started) {
+      started = true;
+      musicTimer = setInterval(musicTick, 340);
+    }
+    applyPrefs();
+  } catch {
+    /* sound never blocks a ward from opening */
   }
-  applyPrefs();
 }
 
 export function setAudioPrefs(sound: boolean, music: boolean) {
@@ -188,6 +209,27 @@ export function sfxFaah() {
   playBite(faahBite);
 }
 
+/** Glowing orbs leaving a match. */
+export function sfxOrbFly() {
+  tone(740, 0.14, "sine", 0.05, 0, 1480);
+  tone(1180, 0.1, "triangle", 0.03, 0.03, 1960);
+}
+
+let orbPopAt = 0;
+let orbPopStep = 0;
+
+/** A glitter pop when an orb lands. */
+export function sfxOrbPop() {
+  if (!ctx || !soundOn) return;
+  const now = ctx.currentTime;
+  if (now < orbPopAt) return;
+  orbPopAt = now + 0.055;
+  orbPopStep = (orbPopStep + 1) % 6;
+  const freq = 980 + orbPopStep * 80;
+  tone(freq, 0.055, "sine", 0.05);
+  tone(freq * 1.9, 0.03, "triangle", 0.02, 0.008);
+}
+
 export function sfxClick() {
   tone(720, 0.04, "sine", 0.05);
 }
@@ -213,6 +255,66 @@ export function sfxMatch(combo: number) {
   tone(base, 0.1, "triangle", 0.12);
   tone(base * 1.5, 0.08, "sine", 0.05, 0.02);
   tone(base * 1.25, 0.12, "sine", 0.06, 0.05);
+}
+
+/** A candy landing on Nurse Karen. */
+export function sfxBossHit() {
+  tone(160, 0.07, "square", 0.05, 0, 70);
+  tone(90, 0.09, "sine", 0.06);
+}
+
+/** Glass breaking, then a wet catch. */
+export function sfxShatter() {
+  const audio = ctx;
+  if (!audio || !sfxBus || !soundOn) return;
+  const dur = 0.22;
+  const buffer = audio.createBuffer(1, Math.floor(audio.sampleRate * dur), audio.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    const env = (1 - i / data.length) ** 2;
+    data[i] = (Math.random() * 2 - 1) * env;
+  }
+  const src = audio.createBufferSource();
+  src.buffer = buffer;
+  const hp = audio.createBiquadFilter();
+  hp.type = "highpass";
+  hp.frequency.value = 1800;
+  const amp = audio.createGain();
+  amp.gain.value = 0.42;
+  src.connect(hp);
+  hp.connect(amp);
+  amp.connect(sfxBus);
+  src.start();
+  tone(1480, 0.06, "square", 0.04, 0, 400);
+  tone(2100, 0.05, "sine", 0.035, 0.03, 200);
+  tone(220, 0.16, "sine", 0.06, 0.08);
+}
+
+/** A dry crack when bones line up. */
+export function sfxCrack() {
+  const audio = ctx;
+  if (!audio || !sfxBus || !soundOn) return;
+  const dur = 0.16;
+  const buffer = audio.createBuffer(1, Math.floor(audio.sampleRate * dur), audio.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) {
+    const env = (1 - i / data.length) ** 3;
+    data[i] = (Math.random() * 2 - 1) * env;
+  }
+  const src = audio.createBufferSource();
+  src.buffer = buffer;
+  const hp = audio.createBiquadFilter();
+  hp.type = "bandpass";
+  hp.frequency.value = 1600;
+  hp.Q.value = 0.6;
+  const amp = audio.createGain();
+  amp.gain.value = 0.5;
+  src.connect(hp);
+  hp.connect(amp);
+  amp.connect(sfxBus);
+  src.start();
+  tone(72, 0.1, "sine", 0.1);
+  tone(240, 0.05, "square", 0.035, 0.015, 80);
 }
 
 /** A chain that has gone past the wow and is still falling. */

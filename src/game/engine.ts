@@ -1,4 +1,4 @@
-export const KINDS = ["heart", "cross", "pill", "bandage", "nurse", "kit", "teddy", "diaper", "bottle", "pacifier", "gift", "rattle"] as const;
+export const KINDS = ["heart", "cross", "pill", "bandage", "nurse", "kit", "teddy", "diaper", "bottle", "pacifier", "gift", "rattle", "scan", "ruby", "gilt", "glow", "plus", "gem", "iv", "slate", "flask", "tubes", "scope", "biohaz", "eyewash", "cyl", "goggles", "extinguisher", "boot", "xray", "ribs", "calcium", "badge", "screw", "wrap", "pelvis"] as const;
 export type Kind = (typeof KINDS)[number];
 export type Power = "row" | "col" | "bomb" | "rainbow";
 export type Special = Power | null;

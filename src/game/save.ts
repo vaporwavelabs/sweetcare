@@ -2,6 +2,17 @@ import { defaultCareer, type Career } from "./profile.ts";
 import { previewSeed } from "./generator.ts";
 import { dayKey, shiftForDate, type ShiftId } from "./shifts.ts";
 
+export interface DecorPin {
+  id: string;
+  sticker: string;
+  x: number;
+  y: number;
+}
+
+export const LOOT_STICKERS = ["heart", "teddy", "gift", "rattle", "bandage", "pill", "kit", "nurse"] as const;
+
+const STICKER_SET = new Set<string>(LOOT_STICKERS);
+
 export interface SaveData {
   version: 1;
   unlocked: number;
@@ -20,12 +31,14 @@ export interface SaveData {
   attemptShifts: Record<string, ShiftId>;
   /** Clears since the last seed roll. Bumps the next seed. */
   clears: Record<string, number>;
+  loot: boolean;
+  decor: DecorPin[];
 }
 
 const KEY = "sweet-care-save-v1";
 
 export function defaultSave(): SaveData {
-  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {} };
+  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [] };
 }
 
 export function rememberOpened(opened: number[] | undefined, levelId: number): number[] {
@@ -62,6 +75,8 @@ export function loadSave(): SaveData {
       seeds: numberMap(parsed.seeds),
       attemptShifts: shiftMap(parsed.attemptShifts),
       clears: numberMap(parsed.clears),
+      loot: parsed.loot === true || (parsed.stars?.["5"] ?? 0) > 0,
+      decor: readDecor(parsed.decor),
     };
   } catch {
     return defaultSave();
@@ -155,5 +170,22 @@ export function recordWin(save: SaveData, levelId: number, stars: number, score:
   next.best[key] = Math.max(next.best[key] ?? 0, score);
   if (timeMs != null && timeMs > 0 && (next.times[key] == null || timeMs < next.times[key]!)) next.times[key] = timeMs;
   if (levelId >= next.unlocked && levelId < 15) next.unlocked = levelId + 1;
+  if (levelId === 5) next.loot = true;
   return next;
+}
+
+function readDecor(value: unknown): DecorPin[] {
+  if (!Array.isArray(value)) return [];
+  const pins: DecorPin[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const pin = item as Partial<DecorPin>;
+    if (typeof pin.id !== "string" || typeof pin.sticker !== "string" || !STICKER_SET.has(pin.sticker)) continue;
+    const x = Number(pin.x);
+    const y = Number(pin.y);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    pins.push({ id: pin.id.slice(0, 40), sticker: pin.sticker, x: Math.min(100, Math.max(0, x)), y: Math.min(100, Math.max(0, y)) });
+    if (pins.length >= 16) break;
+  }
+  return pins;
 }

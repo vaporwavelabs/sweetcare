@@ -7,6 +7,8 @@ export type ParticleHandle = {
   summon: (cells: { r: number; c: number }[], count?: number) => void;
   rain: () => void;
   scoreFly: (feeds: { r: number; c: number; kind: Kind; points: number }[], onArrive: (points: number) => void) => void;
+  bossFly: (cells: { r: number; c: number; kind: Kind }[], damage: number, onHit: (damage: number) => void) => void;
+  spill: (cells: { r: number; c: number }[], tint?: "urine" | "lab" | "water" | "glass" | "red", shards?: boolean) => void;
   stars: () => void;
 };
 
@@ -23,6 +25,30 @@ const GLOW: Record<Kind, string> = {
   pacifier: "#ff7ab8",
   gift: "#ff5fa2",
   rattle: "#7aa6ff",
+  scan: "#5ec8ff",
+  ruby: "#ff3344",
+  gilt: "#ffc53a",
+  glow: "#3dff78",
+  plus: "#ffbf1a",
+  gem: "#fff4ff",
+  iv: "#3ec6ff",
+  slate: "#8ec5ff",
+  flask: "#3ec0ff",
+  tubes: "#49b7ff",
+  scope: "#d7dde8",
+  biohaz: "#ff8a1e",
+  eyewash: "#3d7dff",
+  cyl: "#4db4ff",
+  goggles: "#9fd7ff",
+  extinguisher: "#ff3b3b",
+  boot: "#3d7dff",
+  xray: "#7dff9a",
+  ribs: "#f4f7fb",
+  calcium: "#ff5a6a",
+  badge: "#ff3344",
+  screw: "#d5dbe6",
+  wrap: "#f0d24a",
+  pelvis: "#f7f4ef",
 };
 
 const SPRITES: Kind[] = [...KINDS];
@@ -40,12 +66,14 @@ function loadSprites() {
 export function ParticleLayer({
   boardRef,
   scoreRef,
+  bossRef,
   rows,
   cols,
   apiRef,
 }: {
   boardRef: { current: HTMLDivElement | null };
   scoreRef: { current: HTMLElement | null };
+  bossRef: { current: HTMLElement | null };
   rows: number;
   cols: number;
   apiRef: { current: ParticleHandle | null };
@@ -68,10 +96,16 @@ export function ParticleLayer({
       color: string;
       points: number;
       homing: boolean;
+      boss: boolean;
       star: boolean;
       flash: boolean;
+      flame?: boolean;
+      glitter?: boolean;
+      scale?: number;
       age: number;
+      trail: { x: number; y: number }[];
     }[] = [];
+    const drops: { x: number; y: number; vx: number; vy: number; r: number; age: number; pooled: boolean; catch: boolean; tint: "urine" | "lab" | "water" | "glass" | "red" }[] = [];
     const sprites = loadSprites();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let alive = true;
@@ -113,6 +147,17 @@ export function ParticleLayer({
       };
     };
 
+    const bossPoint = () => {
+      const hostRect = host.getBoundingClientRect();
+      const boss = bossRef.current;
+      if (!boss) return { x: hostRect.width * 0.18, y: 86 };
+      const rect = boss.getBoundingClientRect();
+      return {
+        x: rect.left - hostRect.left + rect.width / 2,
+        y: rect.top - hostRect.top + rect.height * 0.42,
+      };
+    };
+
     const drawStar = (x: number, y: number, spin: number) => {
       ctx.save();
       ctx.translate(x, y);
@@ -134,36 +179,124 @@ export function ParticleLayer({
       ctx.restore();
     };
 
-    const drawGlow = (x: number, y: number, vx: number, vy: number, color: string, age: number) => {
-      const speed = Math.hypot(vx, vy);
-      const nx = speed > 1 ? vx / speed : 0;
-      const ny = speed > 1 ? vy / speed : -1;
-      const trail = ctx.createLinearGradient(x, y, x - nx * 34, y - ny * 34);
-      trail.addColorStop(0, color);
-      trail.addColorStop(1, "rgba(255,255,255,0)");
-      ctx.strokeStyle = trail;
-      ctx.lineWidth = 7;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(x, y);
-      ctx.lineTo(x - nx * 34, y - ny * 34);
-      ctx.stroke();
-      const pulse = 18 + Math.sin(age * 22) * 2;
+    const drawGlow = (x: number, y: number, color: string, age: number, trail: { x: number; y: number }[]) => {
+      if (trail.length > 1) {
+        ctx.save();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 18;
+        ctx.beginPath();
+        ctx.moveTo(trail[0]!.x, trail[0]!.y);
+        for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i]!.x, trail[i]!.y);
+        ctx.lineTo(x, y);
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.55;
+        ctx.lineWidth = 10;
+        ctx.stroke();
+        ctx.strokeStyle = "#fffef8";
+        ctx.globalAlpha = 0.9;
+        ctx.lineWidth = 3.2;
+        ctx.stroke();
+        ctx.restore();
+      }
+      const pulse = 22 + Math.sin(age * 22) * 3;
       const halo = ctx.createRadialGradient(x, y, 0, x, y, pulse);
       halo.addColorStop(0, "#ffffff");
-      halo.addColorStop(0.22, "#fffef8");
-      halo.addColorStop(0.48, color);
+      halo.addColorStop(0.18, "#fffef8");
+      halo.addColorStop(0.42, color);
       halo.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.save();
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 22;
       ctx.fillStyle = halo;
       ctx.beginPath();
       ctx.arc(x, y, pulse, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.arc(x - 3, y - 3, 3.2, 0, Math.PI * 2);
+      ctx.arc(x, y, 5.4, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
     };
+
+    const drawFlame = (x: number, y: number, color: string, age: number, trail: { x: number; y: number }[], scale: number, homing: boolean) => {
+      const fade = homing ? 1 : Math.max(0, 1 - age / 0.55);
+      const radius = (homing ? 18 : 7) * scale;
+      ctx.save();
+      ctx.globalAlpha = fade;
+      if (trail.length > 1) {
+        ctx.lineCap = "round";
+        ctx.strokeStyle = color;
+        ctx.shadowColor = "#ff5a1f";
+        ctx.shadowBlur = 12;
+        ctx.lineWidth = (homing ? 6 : 2.4) * scale * fade;
+        ctx.beginPath();
+        ctx.moveTo(trail[0]!.x, trail[0]!.y);
+        for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i]!.x, trail[i]!.y);
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      }
+      const halo = ctx.createRadialGradient(x, y, 0, x, y, radius);
+      halo.addColorStop(0, "#fffef2");
+      halo.addColorStop(0.28, "#ffe14a");
+      halo.addColorStop(0.55, color);
+      halo.addColorStop(1, "rgba(180, 20, 0, 0)");
+      ctx.shadowColor = "#ff3b00";
+      ctx.shadowBlur = homing ? 18 : 8;
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    const drawGlitter = (x: number, y: number, color: string, age: number, trail: { x: number; y: number }[], scale: number, homing: boolean) => {
+      const fade = homing ? 1 : Math.max(0, 1 - age / 0.48);
+      for (let i = 0; i < trail.length; i++) {
+        const point = trail[i]!;
+        const twinkle = 0.3 + 0.7 * Math.abs(Math.sin(age * 30 + i * 1.7));
+        const size = (homing ? 3.4 : 2.1) * scale * (0.55 + twinkle);
+        ctx.save();
+        ctx.globalAlpha = fade * twinkle;
+        ctx.translate(point.x + Math.sin(i * 2.2) * 4, point.y + Math.cos(i * 1.6) * 3);
+        ctx.rotate(age * 9 + i);
+        ctx.fillStyle = i % 2 === 0 ? "#fffef8" : color;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(0, -size);
+        ctx.lineTo(size * 0.28, -size * 0.28);
+        ctx.lineTo(size, 0);
+        ctx.lineTo(size * 0.28, size * 0.28);
+        ctx.lineTo(0, size);
+        ctx.lineTo(-size * 0.28, size * 0.28);
+        ctx.lineTo(-size, 0);
+        ctx.lineTo(-size * 0.28, -size * 0.28);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+      const pulse = (homing ? 16 : 11) * scale;
+      const halo = ctx.createRadialGradient(x, y, 0, x, y, pulse);
+      halo.addColorStop(0, "#ffffff");
+      halo.addColorStop(0.32, color);
+      halo.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.fillStyle = halo;
+      ctx.beginPath();
+      ctx.arc(x, y, pulse, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#fffef8";
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(1.5, pulse * 0.22), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    };
+
     let onScore = (_points: number) => {};
+    let onBoss = (_damage: number) => {};
 
     const kick = () => {
       if (!raf && alive) {
@@ -236,6 +369,8 @@ export function ParticleLayer({
       }
       for (const spark of seekers) {
         if (spark.star) drawStar(spark.x, spark.y, spark.age * 8);
+        else if (spark.glitter) drawGlitter(spark.x, spark.y, spark.color, spark.age, spark.trail, spark.scale ?? 1, spark.homing);
+        else if (spark.flame) drawFlame(spark.x, spark.y, spark.color, spark.age, spark.trail, spark.scale ?? 1, spark.homing);
         else if (spark.flash) {
           const t = Math.min(1, spark.age / 0.32);
           ctx.save();
@@ -246,7 +381,48 @@ export function ParticleLayer({
           ctx.arc(spark.x, spark.y, 8 + t * 26, 0, Math.PI * 2);
           ctx.stroke();
           ctx.restore();
-        } else drawGlow(spark.x, spark.y, spark.vx, spark.vy, spark.color, spark.age);
+        } else drawGlow(spark.x, spark.y, spark.color, spark.age, spark.trail);
+      }
+      for (const drop of drops) {
+        const hold = drop.tint === "red" ? 1.35 : 0.85;
+        const fade = drop.pooled ? Math.max(0, 1 - Math.max(0, drop.age - hold) / 0.7) : drop.tint === "glass" ? Math.max(0, 1 - drop.age / 1.15) : 1;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, Math.min(1, fade)) * (drop.tint === "glass" ? 0.85 : 0.92);
+        if (drop.tint === "glass") {
+          ctx.translate(drop.x, drop.y);
+          ctx.rotate(drop.age * (drop.catch ? 2 : 8) + drop.r);
+          ctx.fillStyle = drop.catch ? "rgba(255, 236, 240, 0.75)" : "rgba(236, 248, 255, 0.9)";
+          ctx.strokeStyle = drop.catch ? "rgba(255, 80, 110, 0.9)" : "rgba(120, 190, 230, 0.95)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(-drop.r, -drop.r * 0.3);
+          ctx.lineTo(drop.r * 0.8, -drop.r * 0.1);
+          ctx.lineTo(drop.r * 0.2, drop.r);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+          ctx.restore();
+          continue;
+        }
+        const pool = drop.pooled ? drop.r * (drop.tint === "red" ? 2.4 : 1.8) : drop.r;
+        const ink =
+          drop.tint === "red"
+            ? ["#ffd5de", "#e1063a", "rgba(110, 0, 24, 0)"]
+            : drop.tint === "lab"
+            ? ["#e7f6ff", "#3aa0ff", "rgba(20, 90, 210, 0)"]
+            : drop.tint === "water"
+              ? ["#ffffff", "#c5ecff", "rgba(160, 210, 255, 0)"]
+              : ["#fff3a8", "#f0c43a", "rgba(196, 132, 20, 0)"];
+        const blob = ctx.createRadialGradient(drop.x, drop.y, 0, drop.x, drop.y, pool);
+        blob.addColorStop(0, ink[0]);
+        blob.addColorStop(0.45, ink[1]);
+        blob.addColorStop(1, ink[2]);
+        ctx.fillStyle = blob;
+        ctx.beginPath();
+        if (drop.pooled) ctx.ellipse(drop.x, drop.y, pool, pool * 0.42, 0, 0, Math.PI * 2);
+        else ctx.arc(drop.x, drop.y, drop.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       }
     };
 
@@ -260,22 +436,50 @@ export function ParticleLayer({
         const spark = seekers[i]!;
         spark.age += dt;
         if (spark.homing) {
-          const dx = goal.x - spark.x;
-          const dy = goal.y - spark.y;
+          spark.trail.push({ x: spark.x, y: spark.y });
+          if (spark.trail.length > 16) spark.trail.shift();
+          const dest = spark.boss ? bossPoint() : goal;
+          const dx = dest.x - spark.x;
+          const dy = dest.y - spark.y;
           const dist = Math.hypot(dx, dy) || 1;
           if (dist < 26 || spark.age > 0.85) {
-            if (spark.points > 0) onScore(spark.points);
+            if (spark.boss) {
+              if (spark.points > 0) onBoss(spark.points);
+              const bits = ["#fffef8", "#ffe56a", spark.color, "#ffffff"];
+              for (let n = 0; n < 14; n++) {
+                const angle = (Math.PI * 2 * n) / 14;
+                const speed = 80 + (n % 5) * 42;
+                seekers.push({
+                  x: dest.x,
+                  y: dest.y,
+                  vx: Math.cos(angle) * speed,
+                  vy: Math.sin(angle) * speed - 40,
+                  color: bits[n % bits.length]!,
+                  points: 0,
+                  homing: false,
+                  boss: false,
+                  star: false,
+                  flash: false,
+                  glitter: true,
+                  scale: 0.45 + (n % 3) * 0.12,
+                  age: 0,
+                  trail: [],
+                });
+              }
+            } else if (spark.points > 0) onScore(spark.points);
             seekers.push({
-              x: goal.x,
-              y: goal.y,
+              x: dest.x,
+              y: dest.y,
               vx: 0,
               vy: 0,
               color: spark.color,
               points: 0,
               homing: false,
+              boss: false,
               star: false,
               flash: true,
               age: 0,
+              trail: [],
             });
             seekers.splice(i, 1);
             continue;
@@ -293,6 +497,22 @@ export function ParticleLayer({
             seekers.splice(i, 1);
             continue;
           }
+        } else if (spark.glitter) {
+          spark.vy += 220 * dt;
+          spark.vx *= 0.98;
+          if (spark.age > 0.48) {
+            seekers.splice(i, 1);
+            continue;
+          }
+        } else if (spark.flame) {
+          spark.trail.push({ x: spark.x, y: spark.y });
+          if (spark.trail.length > 8) spark.trail.shift();
+          spark.vy -= 40 * dt;
+          spark.vx *= 0.99;
+          if (spark.age > 0.55) {
+            seekers.splice(i, 1);
+            continue;
+          }
         } else {
           spark.vy += 420 * dt;
           spark.vx *= 0.985;
@@ -304,8 +524,58 @@ export function ParticleLayer({
         spark.x += spark.vx * dt;
         spark.y += spark.vy * dt;
       }
+      const board = boardRef.current;
+      const hostRect = host.getBoundingClientRect();
+      const boardRect = board?.getBoundingClientRect();
+      const floor = boardRect ? boardRect.bottom - hostRect.top - 8 : hostRect.height * 0.72;
+      for (let i = drops.length - 1; i >= 0; i--) {
+        const drop = drops[i]!;
+        drop.age += dt;
+        if (!drop.pooled) {
+          drop.vy += (drop.tint === "glass" ? 1500 : 1680) * dt;
+          drop.x += drop.vx * dt;
+          drop.y += drop.vy * dt;
+          if (drop.y >= floor) {
+            drop.y = floor;
+            if (drop.tint === "glass") {
+              if (drop.catch) {
+                drop.pooled = true;
+                drop.vy = 0;
+                drop.vx *= 0.15;
+                drop.age = Math.max(drop.age, 0.35);
+              } else {
+                drop.vy *= -0.46;
+                drop.vx *= 0.72;
+                if (Math.abs(drop.vy) < 36 || drop.age > 1.15) {
+                  drops.splice(i, 1);
+                  continue;
+                }
+              }
+            } else {
+              drop.vy *= -0.18;
+              drop.vx += (Math.random() - 0.5) * 80;
+              drop.vx *= 0.45;
+              if (Math.abs(drop.vy) < 40) {
+                drop.pooled = true;
+                drop.vy = 0;
+                drop.age = 0.2;
+              }
+            }
+          }
+        } else {
+          drop.vx *= 0.9;
+          drop.x += drop.vx * dt;
+          if (drop.tint === "glass") drop.y = floor;
+          else drop.r += dt * 6;
+          const gone = drop.tint === "red" ? 2.15 : drop.tint === "glass" ? 1.05 : 1.5;
+          if (drop.age > gone) {
+            drops.splice(i, 1);
+            continue;
+          }
+        }
+      }
       draw();
-      if (world.bodies.length === 0 && seekers.length === 0) {
+      if (world.bodies.length === 0 && seekers.length === 0 && drops.length === 0) {
         raf = 0;
         return;
       }
@@ -384,10 +654,88 @@ export function ParticleLayer({
               color: GLOW[feed.kind],
               points,
               homing: true,
+              boss: false,
               star: false,
               flash: false,
               age: 0,
+              trail: [],
             });
+          }
+        }
+        kick();
+      },
+      bossFly(cells, damage, onHit) {
+        if (cells.length === 0 || damage <= 0) return;
+        onBoss = onHit;
+        if (reduced) {
+          onHit(damage * cells.length);
+          return;
+        }
+        fit();
+        const goal = bossPoint();
+        const shown = cells.slice(0, 24);
+        for (let i = 0; i < shown.length; i++) {
+          const cell = shown[i]!;
+          const origin = pointFor(cell.r, cell.c);
+          const dx = goal.x - origin.x;
+          const dy = goal.y - origin.y;
+          const dist = Math.hypot(dx, dy) || 1;
+          seekers.push({
+            x: origin.x,
+            y: origin.y,
+            vx: (dx / dist) * 720,
+            vy: (dy / dist) * 720 - 40,
+            color: GLOW[cell.kind],
+            points: damage,
+            homing: true,
+            boss: true,
+            star: false,
+            flash: false,
+            glitter: true,
+            scale: 1,
+            age: 0,
+            trail: [],
+          });
+        }
+        const extra = cells.length - shown.length;
+        if (extra > 0) onHit(damage * extra);
+        kick();
+      },
+      spill(cells, tint = "urine", shards = false) {
+        if (reduced || cells.length < 3) return;
+        fit();
+        for (const cell of cells) {
+          const origin = pointFor(cell.r, cell.c);
+          if (tint !== "glass") {
+            const spray = tint === "water" ? 42 : tint === "red" ? 26 : 18;
+            for (let i = 0; i < 16; i++) {
+              drops.push({
+                x: origin.x + (i - 8) * 1.6,
+                y: origin.y + (i % 3) * 2,
+                vx: (i - 8) * spray,
+                vy: tint === "water" ? -40 + (i % 4) * 22 : tint === "red" ? -120 + (i % 4) * 18 : 30 + (i % 5) * 28,
+                r: tint === "red" ? 4.4 + (i % 4) : 3.2 + (i % 4),
+                age: 0,
+                pooled: false,
+                catch: false,
+                tint,
+              });
+            }
+          }
+          if (shards || tint === "glass") {
+            for (let i = 0; i < 9; i++) {
+              drops.push({
+                x: origin.x + (i - 4) * 2,
+                y: origin.y,
+                vx: (i - 4) * 110,
+                vy: -160 - (i % 3) * 50,
+                r: 5 + (i % 3) * 1.4,
+                age: 0,
+                pooled: false,
+                catch: tint === "red",
+                tint: "glass",
+              });
+            }
           }
         }
         kick();
@@ -411,9 +759,11 @@ export function ParticleLayer({
             color: "#ffe56a",
             points: 0,
             homing: false,
+            boss: false,
             star: true,
             flash: false,
             age: 0,
+            trail: [],
           });
         }
         kick();
@@ -425,7 +775,7 @@ export function ParticleLayer({
       apiRef.current = null;
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [apiRef, boardRef, cols, rows, scoreRef]);
+  }, [apiRef, boardRef, bossRef, cols, rows, scoreRef]);
 
   return (
     <div className="particle-host" ref={hostRef}>

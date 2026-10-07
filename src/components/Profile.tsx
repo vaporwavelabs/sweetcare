@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { ChevronLeft } from "lucide-react";
 import { GIFT_CARDS, type GiftCard } from "@/game/cards";
 import { LEVELS } from "@/game/levels";
@@ -12,6 +12,7 @@ import {
   type Career,
 } from "@/game/profile";
 import type { SaveData } from "@/game/save";
+import { LOOT_STICKERS } from "@/game/save";
 
 export function portrait(career: Career) {
   return career.look === "f" ? "/avatar/idle-f.png" : "/avatar/idle.png";
@@ -80,16 +81,19 @@ export function CountUp({ value }: { value: number }) {
 
 export function ProfileScreen({
   save,
+  openCase = false,
   onBack,
   onReplay,
   onChange,
 }: {
   save: SaveData;
+  openCase?: boolean;
   onBack: () => void;
   onReplay: (id: number) => void;
   onChange: (recipe: (prev: SaveData) => SaveData) => void;
 }) {
   const career = save.career;
+  const [caseOpen, setCaseOpen] = useState(openCase);
   const gap = gapFor(career.rank);
   const board = LEVELS.map((level) => ({
     id: level.id,
@@ -161,6 +165,18 @@ export function ProfileScreen({
             );
           })}
         </div>
+        <h3>Suitcase</h3>
+        {caseOpen && save.loot ? (
+          <HomeBase decor={save.decor ?? []} onChange={onChange} onClose={() => setCaseOpen(false)} />
+        ) : (
+          <button className="suitcase-btn" type="button" disabled={!save.loot} onClick={() => setCaseOpen(true)}>
+            <img src="/ui/loot-case.jpg" alt="" />
+            <span>
+              <b>Loot case</b>
+              <small>{save.loot ? "Decorate your home base" : "Beat Nurse Karen to unlock"}</small>
+            </span>
+          </button>
+        )}
         <h3>Gifts</h3>
         <GiftShelf owned={save.gifts ?? []} />
         <h3>Cosmetics</h3>
@@ -230,6 +246,60 @@ export function SketchModel({ card }: { card: GiftCard }) {
           Sketchfab
         </a>
       </p>
+    </div>
+  );
+}
+
+function HomeBase({
+  decor,
+  onChange,
+  onClose,
+}: {
+  decor: SaveData["decor"];
+  onChange: (recipe: (prev: SaveData) => SaveData) => void;
+  onClose: () => void;
+}) {
+  const [sticker, setSticker] = useState<string>(LOOT_STICKERS[0]);
+  const place = (event: MouseEvent<HTMLDivElement>) => {
+    if (decor.length >= 16) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - rect.left) / rect.width) * 100;
+    const y = ((event.clientY - rect.top) / rect.height) * 100;
+    const id = `${Date.now().toString(36)}-${decor.length}`;
+    onChange((prev) => ({ ...prev, decor: [...(prev.decor ?? []), { id, sticker, x, y }] }));
+  };
+  const remove = (id: string) => {
+    onChange((prev) => ({ ...prev, decor: (prev.decor ?? []).filter((pin) => pin.id !== id) }));
+  };
+  return (
+    <div className="home-base">
+      <div className="home-stage" onClick={place} role="application" aria-label="Home base. Tap to place a decoration.">
+        <img className="room" src="/ui/loot-case.jpg" alt="" />
+        {decor.map((pin) => (
+          <button
+            key={pin.id}
+            type="button"
+            className="home-sticker"
+            style={{ left: `${pin.x}%`, top: `${pin.y}%` }}
+            onClick={(event) => {
+              event.stopPropagation();
+              remove(pin.id);
+            }}
+            aria-label="Remove decoration"
+          >
+            <img src={`/sprites/${pin.sticker}.png`} alt="" />
+          </button>
+        ))}
+      </div>
+      <div className="sticker-palette">
+        {LOOT_STICKERS.map((kind) => (
+          <button key={kind} type="button" className={sticker === kind ? "on" : ""} onClick={() => setSticker(kind)} aria-label={kind}>
+            <img src={`/sprites/${kind}.png`} alt="" />
+          </button>
+        ))}
+      </div>
+      <p className="summary-note">Tap the case to place. Tap a decoration to take it off.</p>
+      <button className="btn secondary" type="button" onClick={onClose}>Close suitcase</button>
     </div>
   );
 }

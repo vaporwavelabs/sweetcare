@@ -24,11 +24,21 @@ export interface LevelDef {
   shiftLabel?: string;
   boss?: string | null;
   startSpecial?: "row" | "col" | "bomb" | "rainbow" | null;
+  /** Present on every 5th ward. Draining it wins the level. */
+  bossHp?: number;
+  /** Microbes advance on the board. Healing is a calm organ stage. */
+  encounter?: "microbe" | "heal";
+  patient?: "brain" | "heart";
+  swarm?: { count: number; hp: number; speed: number; bite: number };
+  healNeed?: number;
 }
 
 const HOSPITAL: Kind[] = ["heart", "cross", "pill", "bandage", "nurse", "kit"];
 const CLINIC: Kind[] = ["heart", "cross", "kit", "teddy", "diaper", "bottle"];
 const PEDIATRIC: Kind[] = ["heart", "cross", "kit", "pacifier", "gift", "rattle"];
+const NEURO: Kind[] = ["scan", "ruby", "gilt", "glow", "plus", "gem", "iv", "slate"];
+const LAB: Kind[] = ["flask", "tubes", "scope", "biohaz", "eyewash", "cyl", "goggles", "extinguisher"];
+const ORTHO: Kind[] = ["boot", "xray", "ribs", "calcium", "badge", "screw", "wrap", "pelvis"];
 
 function longer(n: number) {
   return Math.ceil(n * 1.15);
@@ -39,20 +49,41 @@ export const LEVELS: LevelDef[] = [
   { id: 2, name: "Patch Job", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 4), moves: longer(22), goals: [{ type: "collect", kind: "bandage", count: longer(12) }], star2: longer(1600), star3: longer(2800), jelly: "none" },
   { id: 3, name: "Capsule Run", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 5), moves: longer(22), goals: [{ type: "collect", kind: "pill", count: longer(12) }], star2: longer(1700), star3: longer(3000), jelly: "none" },
   { id: 4, name: "Red Cross", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 5), moves: longer(22), goals: [{ type: "collect", kind: "cross", count: longer(12) }], star2: longer(1700), star3: longer(3000), jelly: "none" },
-  { id: 5, name: "Night Nurse", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 5), moves: longer(20), goals: [{ type: "collect", kind: "nurse", count: longer(10) }], star2: longer(1800), star3: longer(3200), jelly: "none" },
+  { id: 5, name: "Nurse Karen", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(20), goals: [{ type: "collect", kind: "heart", count: longer(10) }], star2: longer(1800), star3: longer(3200), jelly: "none", bossHp: 96 },
   { id: 6, name: "Teddy Trail", rows: 6, cols: 6, kinds: CLINIC, moves: longer(22), goals: [{ type: "collect", kind: "teddy", count: longer(10) }], star2: longer(1800), star3: longer(3200), jelly: "none" },
   { id: 7, name: "Diaper Duty", rows: 6, cols: 6, kinds: CLINIC.slice(0, 5), moves: longer(28), goals: [{ type: "jelly" }], star2: longer(1800), star3: longer(3200), jelly: "bottom" },
   { id: 8, name: "Bottle Check", rows: 6, cols: 6, kinds: CLINIC.slice(0, 5), moves: longer(32), goals: [{ type: "jelly" }], star2: longer(2000), star3: longer(3600), jelly: "checker" },
   { id: 9, name: "Score Sprint", rows: 6, cols: 6, kinds: CLINIC, moves: longer(20), goals: [{ type: "score", target: longer(3500) }], star2: longer(4500), star3: longer(6200), jelly: "none" },
-  { id: 10, name: "Heart Surge", rows: 6, cols: 6, kinds: CLINIC, moves: longer(26), goals: [{ type: "collect", kind: "heart", count: longer(14) }], star2: longer(2200), star3: longer(3800), jelly: "none" },
+  { id: 10, name: "Karen Returns", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(26), goals: [{ type: "collect", kind: "heart", count: longer(12) }], star2: longer(2200), star3: longer(3800), jelly: "none", bossHp: 156 },
   { id: 11, name: "Picture Frame", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(32), goals: [{ type: "jelly" }], star2: longer(2000), star3: longer(3600), jelly: "frame" },
   { id: 12, name: "Pacifier Gifts", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(26), goals: [{ type: "collect", kind: "pacifier", count: longer(14) }, { type: "collect", kind: "gift", count: longer(14) }], star2: longer(2400), star3: longer(4000), jelly: "none" },
   { id: 13, name: "Sticky Ward", rows: 6, cols: 6, kinds: PEDIATRIC.slice(0, 5), moves: longer(36), goals: [{ type: "jelly" }], star2: longer(2400), star3: longer(4200), jelly: "all" },
   { id: 14, name: "Night Shift", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(22), goals: [{ type: "score", target: longer(5500) }], star2: longer(6800), star3: longer(8600), jelly: "none" },
-  { id: 15, name: "First Aid Rescue", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(36), goals: [{ type: "jelly" }, { type: "collect", kind: "kit", count: longer(10) }], star2: longer(3200), star3: longer(5200), jelly: "lower" },
+  { id: 15, name: "Head Nurse", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(36), goals: [{ type: "collect", kind: "cross", count: longer(12) }], star2: longer(3200), star3: longer(5200), jelly: "none", bossHp: 220 },
+  { id: 16, name: "Neuro Ward", rows: 6, cols: 6, kinds: NEURO, moves: longer(34), goals: [{ type: "collect", kind: "iv", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
+  { id: 17, name: "Lab Run", rows: 6, cols: 6, kinds: LAB, moves: longer(34), goals: [{ type: "collect", kind: "flask", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
+  { id: 18, name: "Ortho Bay", rows: 6, cols: 6, kinds: ORTHO, moves: longer(34), goals: [{ type: "collect", kind: "pelvis", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
+  { id: 19, name: "Peds", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(26), goals: [{ type: "collect", kind: "gift", count: longer(10) }], star2: longer(2000), star3: longer(3400), jelly: "none" },
+  { id: 20, name: "Radiology", rows: 6, cols: 6, kinds: ["scan", "slate", "glow", "xray", "gem", "plus"], moves: longer(28), goals: [{ type: "collect", kind: "scan", count: longer(8) }], star2: longer(2000), star3: longer(3400), jelly: "none" },
+  { id: 21, name: "Neurology", rows: 6, cols: 6, kinds: NEURO, moves: longer(30), goals: [{ type: "collect", kind: "iv", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
+  { id: 22, name: "Ortho", rows: 6, cols: 6, kinds: ORTHO, moves: longer(30), goals: [{ type: "collect", kind: "ribs", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
+  { id: 23, name: "Med Surg", rows: 6, cols: 6, kinds: HOSPITAL, moves: longer(28), goals: [{ type: "collect", kind: "kit", count: longer(10) }], star2: longer(2000), star3: longer(3400), jelly: "none" },
+  { id: 24, name: "ICU", rows: 6, cols: 6, kinds: ["heart", "cross", "pill", "kit", "iv", "nurse"], moves: longer(24), goals: [{ type: "collect", kind: "iv", count: longer(12) }], star2: longer(2400), star3: longer(4000), jelly: "none" },
+  { id: 25, name: "PCU", rows: 6, cols: 6, kinds: CLINIC, moves: longer(28), goals: [{ type: "collect", kind: "bottle", count: longer(10) }], star2: longer(2000), star3: longer(3400), jelly: "none" },
+  { id: 26, name: "Spore Drift", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(24), goals: [], star2: longer(1400), star3: longer(2600), jelly: "none", encounter: "microbe", swarm: { count: 4, hp: 16, speed: 7, bite: 8 } },
+  { id: 27, name: "Culture", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(26), goals: [], star2: longer(1800), star3: longer(3200), jelly: "none", encounter: "microbe", swarm: { count: 6, hp: 24, speed: 10, bite: 12 } },
+  { id: 28, name: "Outbreak", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "kit"], moves: longer(28), goals: [], star2: longer(2200), star3: longer(3800), jelly: "none", encounter: "microbe", swarm: { count: 8, hp: 32, speed: 13, bite: 16 } },
+  { id: 29, name: "Brain Calm", rows: 5, cols: 6, kinds: ["heart", "cross", "pill", "kit"], moves: longer(40), goals: [], star2: longer(1200), star3: longer(2400), jelly: "none", encounter: "heal", patient: "brain", healNeed: longer(14) },
+  { id: 30, name: "Heart Mend", rows: 5, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(46), goals: [], star2: longer(1400), star3: longer(2800), jelly: "none", encounter: "heal", patient: "heart", healNeed: longer(18) },
 ];
 
 export const HOSPITAL_KINDS = HOSPITAL;
+
+export const WARD_IDS = [19, 20, 21, 22, 23, 24, 25] as const;
+
+export function wardsOpen(stars: Record<string, number>): boolean {
+  return (stars["5"] ?? 0) > 0;
+}
 
 export interface MapSpot {
   id: number;
@@ -77,6 +108,14 @@ export const MAP_SPOTS: MapSpot[] = [
   { id: 13, x: 87, y: 58 },
   { id: 14, x: 70, y: 68 },
   { id: 15, x: 79, y: 74 },
+  { id: 16, x: 34, y: 32 },
+  { id: 17, x: 48, y: 30 },
+  { id: 18, x: 90, y: 34 },
+  { id: 26, x: 18, y: 24 },
+  { id: 27, x: 30, y: 18 },
+  { id: 28, x: 42, y: 24 },
+  { id: 29, x: 20, y: 78 },
+  { id: 30, x: 34, y: 84 },
 ];
 
 export function journeyFor(levelId: number): { fromX: number; fromY: number; toX: number; toY: number; title: string } | null {
