@@ -27,6 +27,7 @@ import {
   type ClearPlan,
   type Kind,
   type Pos,
+  type Power,
   type Rng,
   type Special,
 } from "@/game/engine";
@@ -51,6 +52,10 @@ import {
   setAudioPrefs,
   sfxBad,
   sfxBossHit,
+  sfxBossPhase,
+  sfxBossStrike,
+  sfxBossWarn,
+  sfxInterrupt,
   sfxClick,
   sfxCrack,
   sfxDeep,
@@ -71,6 +76,8 @@ import {
   unlockAudio,
 } from "@/game/audio";
 import { GIFT_CARDS, cardForLevel, rememberGift } from "@/game/cards";
+import { bossTierFor, createBoss, hitBoss, MOVE_LABEL, shoveBoss as shoveKaren, stepBoss, windupProgress, type BossEvent, type BossState } from "@/game/boss";
+import { makeGerm, stepGerm, woundGerm, type Germ } from "@/game/swarm";
 import { generateWard } from "@/game/generator";
 import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
 import { shiftForDate } from "@/game/shifts";
@@ -145,13 +152,13 @@ interface Model {
   shake: boolean;
   animate: boolean;
   view: VTile[];
-  bossHp: number;
-  bossBump: number;
-  bossNear: number;
-  bossLane: number;
-  bossDir: number;
-  bossSlow: number;
-  bossHot: number;
+  boss: BossState | null;
+  /** Tiles taped down by Karen's paperwork, by tile id, with seconds left. */
+  locks: Map<number, number>;
+  /** Tiles she is about to tape. Shown as a warning during the windup. */
+  marked: number[];
+  /** Seconds left of the red hit flash on the stage. */
+  sting: number;
   playerHp: number;
   germs: Germ[];
   germLeft: number;
@@ -161,7 +168,6 @@ interface Model {
 
 type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "cast" | "dev";
 
-type Germ = { id: number; sprite: number; x: number; y: number; hp: number; max: number };
 
 const COLS = 6;
 
@@ -324,7 +330,8 @@ export function SweetCare() {
       const playing = modelRef.current;
       const width = Math.max(1, rect.width);
       const height = Math.max(1, rect.height);
-      if (playing?.level.bossHp) {
+      // Arena wards stack the stage over a full-width board. Sizing from the footer's own height would shrink it every pass.
+      if (playing?.level.bossHp || playing?.level.encounter) {
         const next = Math.max(160, Math.floor(width));
         setSide(next);
         setFrame({ x: 0, y: 0, w: 1, h: 1 });
@@ -577,13 +584,10 @@ export function SweetCare() {
       shake: false,
       animate: false,
       view: [],
-      bossHp: level.bossHp ?? 0,
-      bossBump: 0,
-      bossNear: 0,
-      bossLane: 0.18,
-      bossDir: 1,
-      bossSlow: 0,
-      bossHot: 0,
+      boss: level.bossHp ? createBoss(level.bossHp, bossTierFor(level.id, level.bossHp), attempt.seed ^ level.id) : null,
+      locks: new Map(),
+      marked: [],
+      sting: 0,
       playerHp: 100,
       germs: [],
       germLeft: level.swarm?.count ?? 0,
@@ -591,10 +595,11 @@ export function SweetCare() {
       heal: 0,
     };
     if (level.swarm) {
-      model.germs.push(
-        { id: 1, sprite: 1, x: 22, y: 28, hp: level.swarm.hp, max: level.swarm.hp },
-        { id: 2, sprite: 3, x: 68, y: 14, hp: level.swarm.hp, max: level.swarm.hp },
-      );
+      const first = makeGerm(++seq.current, 0, level.swarm, false);
+      const second = makeGerm(++seq.current, 1, level.swarm, false);
+      first.y = 28;
+      second.y = 14;
+      model.germs.push(first, second);
       model.germLeft = Math.max(0, level.swarm.count - 2);
     }
     model.view = readView(board, new Set(), new Set(), reducedMotion() ? undefined : liftAll(board, -level.rows));
@@ -657,27 +662,26 @@ export function SweetCare() {
     if (!swarm || model.germLeft <= 0) return;
     model.germLeft -= 1;
     const n = model.germKills + model.germs.length;
-    model.germs.push({
-      id: ++seq.current,
-      sprite: (n % 5) + 1,
-      x: 8 + (n % 4) * 22,
-      y: 4 + (n % 3) * 6,
-      hp: swarm.hp,
-      max: swarm.hp,
-    });
+    const germ = makeGerm(++seq.current, n, swarm, model.germLeft === 0);
+    model.germs.push(germ);
+    if (germ.kind === "mother") {
+      say(model, "Mother cell!");
+      sfxBossWarn();
+    }
   }
 
   function hurtGerm(model: Model, amount: number) {
     const swarm = model.level.swarm;
     if (!swarm || amount <= 0 || model.germs.length === 0) return;
     const lead = model.germs.reduce((best, germ) => (germ.y > best.y ? germ : best));
-    lead.hp -= amount;
-    lead.y = Math.max(-18, lead.y - 4);
-    if (lead.hp <= 0) {
+    const hit = woundGerm(lead, amount, () => ++seq.current, swarm);
+    particleRef.current?.impact(amount, lead.kind === "mother" ? "crit" : "hit");
+    if (hit.dead) {
       model.germs = model.germs.filter((germ) => germ.id !== lead.id);
+      model.germs.push(...hit.buds);
       model.germKills += 1;
-      model.banner = "Fended off!";
-      if (model.germKills >= swarm.count) {
+      say(model, hit.buds.length ? "She split!" : "Fended off!", 800);
+      if (model.germLeft <= 0 && model.germs.length === 0) {
         window.setTimeout(() => {
           void finish(runRef.current);
         }, 420);
@@ -686,20 +690,133 @@ export function SweetCare() {
     bump();
   }
 
-  function woundBoss(model: Model, amount: number) {
-    if (!model.level.bossHp || model.bossHp <= 0 || amount <= 0) return;
-    model.bossHp = Math.max(0, model.bossHp - amount);
-    model.bossBump += 1;
-    model.bossHot = 1.35;
-    if (model.bossHp === 0) model.banner = "Karen is down!";
+  function woundBoss(model: Model, amount: number, big = false) {
+    const boss = model.boss;
+    if (!boss || boss.hp <= 0 || amount <= 0) return;
+    const wasExposed = Boolean(boss.action);
+    const { dealt, events } = hitBoss(boss, amount, big);
+    if (boss.guard > 0 && dealt === 0) particleRef.current?.impact(0, "guard");
+    else particleRef.current?.impact(dealt, wasExposed || big ? "crit" : "hit");
+    for (const event of events) applyBossEvent(model, event);
     bump();
   }
 
   function shoveBoss(model: Model, push: boolean) {
-    if (!model.level.bossHp || model.bossHp <= 0) return;
-    model.bossSlow = Math.max(model.bossSlow, push ? 2.8 : 2.4);
-    model.bossNear = Math.max(0, model.bossNear - (push ? 28 : 8));
+    if (!model.boss || model.boss.hp <= 0) return;
+    shoveKaren(model.boss, push);
     bump();
+  }
+
+  function loseRound(model: Model, banner: string) {
+    model.elapsed = Math.max(0, Date.now() - model.startedAt);
+    model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
+    model.outcome = "lose";
+    model.curtain = "card";
+    model.phase = "idle";
+    model.banner = banner;
+    sfxLose();
+    closeRound(model, false, model.elapsed);
+    bump();
+  }
+
+  /** A boss line on the board that clears itself, unless something newer replaced it. */
+  function say(model: Model, text: string, ms = 1100) {
+    model.banner = text;
+    window.setTimeout(() => {
+      const current = modelRef.current;
+      if (current?.banner === text) current.banner = null;
+      bump();
+    }, ms);
+  }
+
+  /** Karen's telegraphs and strikes, turned into board effects. */
+  function applyBossEvent(model: Model, event: BossEvent) {
+    if (event.type === "telegraph") {
+      sfxBossWarn();
+      if (event.move === "paperwork") {
+        const free: number[] = [];
+        for (const row of model.board) for (const tile of row) if (tile && !tile.special && !model.locks.has(tile.id)) free.push(tile.id);
+        const picked: number[] = [];
+        while (picked.length < event.power && free.length > 0) {
+          const index = Math.floor(model.rng() * free.length);
+          picked.push(free.splice(index, 1)[0]!);
+        }
+        model.marked = picked;
+      }
+      return;
+    }
+    if (event.type === "interrupt") {
+      model.marked = [];
+      say(model, "Interrupted!");
+      sfxInterrupt();
+      particleRef.current?.bossBurst("interrupt");
+      return;
+    }
+    if (event.type === "phase") {
+      model.marked = [];
+      say(model, event.phase === 1 ? "Karen is fuming!" : "Karen lost it!");
+      model.flash = "summon";
+      sfxBossPhase();
+      particleRef.current?.bossBurst("phase");
+      window.setTimeout(() => {
+        const current = modelRef.current;
+        if (current?.flash === "summon") current.flash = null;
+        bump();
+      }, 700);
+      return;
+    }
+    if (event.type === "down") {
+      model.marked = [];
+      model.locks.clear();
+      say(model, "Karen is down!");
+      particleRef.current?.bossBurst("down");
+      return;
+    }
+    if (event.type === "heal") {
+      say(model, "She had a coffee");
+      particleRef.current?.impact(event.amount, "heal");
+      return;
+    }
+    if (event.type === "contact") {
+      model.playerHp = Math.max(0, model.playerHp - event.bite);
+      model.marked = [];
+      model.sting = 0.5;
+      model.shake = true;
+      say(model, "She grabbed the chart!");
+      sfxBad();
+      sfxBossStrike();
+      window.setTimeout(() => {
+        const current = modelRef.current;
+        if (current) current.shake = false;
+      }, 300);
+      if (model.playerHp <= 0) loseRound(model, "Karen reached the icons");
+      return;
+    }
+    // A strike.
+    sfxBossStrike();
+    if (event.move === "paperwork") {
+      const cells: Pos[] = [];
+      for (let r = 0; r < model.board.length; r++) {
+        for (let c = 0; c < model.board[0]!.length; c++) {
+          const tile = model.board[r]![c];
+          if (tile && model.marked.includes(tile.id)) {
+            model.locks.set(tile.id, 9);
+            cells.push({ r, c });
+          }
+        }
+      }
+      model.marked = [];
+      particleRef.current?.paper(cells);
+      say(model, "Taped down!");
+    } else if (event.move === "writeup") {
+      const taken = Math.min(event.power, Math.max(0, model.moves - 1));
+      model.moves -= taken;
+      model.sting = 0.45;
+      say(model, taken > 0 ? `Write-up! -${taken} move${taken > 1 ? "s" : ""}` : "Write-up!");
+    } else if (event.move === "charge") {
+      model.sting = 0.35;
+      say(model, "She charged!");
+    }
   }
 
   async function playPlan(run: number, plan: ClearPlan) {
@@ -727,6 +844,12 @@ export function SweetCare() {
         sfxOrbFly();
       }
     }
+    const detonated: { r: number; c: number; special: Power }[] = [];
+    for (const cell of plan.removals) {
+      const tile = model.board[cell.r]?.[cell.c];
+      if (tile?.special) detonated.push({ r: cell.r, c: cell.c, special: tile.special });
+      if (tile) model.locks.delete(tile.id);
+    }
     const painted = paintSpecials(model.board, plan);
     liquidRef.current?.splash(plan.removals, Math.min(2.4, 0.85 + plan.combo * 0.22));
     model.view = readView(model.board, new Set(painted.dyingIds), new Set(painted.bornIds));
@@ -743,14 +866,17 @@ export function SweetCare() {
       return kind ? [{ r: cell.r, c: cell.c, kind }] : [];
     });
     if (bits.length > 0) particleRef.current?.burst(bits);
-    if (model.level.bossHp && plan.removals.length >= 3) {
+    particleRef.current?.pop(bits, plan.combo);
+    if (detonated.length > 0) particleRef.current?.detonate(detonated);
+    const bigHit = plan.combo >= 3 || detonated.length > 0 || plan.removals.length >= 5;
+    if (model.boss && plan.removals.length >= 3) {
       const hits = plan.removals.flatMap((cell) => {
         const kind = model.board[cell.r]?.[cell.c]?.kind;
         return kind ? [{ r: cell.r, c: cell.c, kind }] : [];
       });
       sfxBossHit();
       if (hits.length === 0 || reducedMotion() || !particleRef.current) {
-        woundBoss(model, hits.length * 4);
+        woundBoss(model, hits.length * 4, bigHit);
         shoveBoss(model, true);
       } else {
         sfxOrbFly();
@@ -759,7 +885,8 @@ export function SweetCare() {
           const current = modelRef.current;
           if (!current || current.outcome) return;
           landed += 1;
-          woundBoss(current, damage);
+          // The first orb of a big volley is the one that can break a windup.
+          woundBoss(current, damage, bigHit && landed === 1);
           shoveBoss(current, landed % 3 === 0);
           sfxOrbPop();
         });
@@ -910,60 +1037,38 @@ export function SweetCare() {
   onBossTick.current = (dt, paint) => {
     const model = modelRef.current;
     if (!model || model.outcome || model.countdown) return;
+    model.sting = Math.max(0, model.sting - dt);
+    if (model.locks.size > 0) {
+      for (const [id, left] of model.locks) {
+        if (left - dt <= 0) model.locks.delete(id);
+        else model.locks.set(id, left - dt);
+      }
+    }
     if (model.level.encounter === "microbe" && model.level.swarm) {
       const swarm = model.level.swarm;
       while (model.germs.length < 3 && model.germLeft > 0) spawnGerm(model);
       for (const germ of [...model.germs]) {
-        germ.y += swarm.speed * dt;
-        if (germ.y < 84) continue;
-        model.playerHp = Math.max(0, model.playerHp - swarm.bite);
+        if (!stepGerm(germ, swarm, dt)) continue;
+        const bite = germ.kind === "mother" ? swarm.bite * 2 : swarm.bite;
+        model.playerHp = Math.max(0, model.playerHp - bite);
         model.germs = model.germs.filter((item) => item.id !== germ.id);
-        model.banner = "A microbe reached the ward";
+        say(model, "A microbe reached the ward");
+        model.sting = 0.4;
         sfxBad();
         if (model.playerHp <= 0) {
-          model.elapsed = Math.max(0, Date.now() - model.startedAt);
-          model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
-          model.outcome = "lose";
-          model.curtain = "card";
-          model.phase = "idle";
-          model.banner = "The microbes got through";
-          sfxLose();
-          closeRound(model, false, model.elapsed);
-          bump();
+          loseRound(model, "The microbes got through");
           return;
         }
+        if (model.germLeft <= 0 && model.germs.length === 0 && model.phase === "idle") void finish(runRef.current);
       }
       if (paint) bump();
       return;
     }
-    if (!model.level.bossHp || model.bossHp <= 0) return;
-    model.bossSlow = Math.max(0, model.bossSlow - dt);
-    model.bossHot = Math.max(0, model.bossHot - dt);
-    const stride = model.bossSlow > 0 ? 0.04 : 0.18;
-    model.bossLane += model.bossDir * stride * dt;
-    if (model.bossLane <= 0) {
-      model.bossLane = 0;
-      model.bossDir = 1;
-    } else if (model.bossLane >= 1) {
-      model.bossLane = 1;
-      model.bossDir = -1;
-    }
-    const speed = model.bossSlow > 0 ? 1.4 : 7;
-    model.bossNear = Math.min(100, model.bossNear + speed * dt);
-    if (model.bossNear >= 98) {
-      model.playerHp = Math.max(0, model.playerHp - 20 * dt);
-      if (model.playerHp <= 0) {
-        model.elapsed = Math.max(0, Date.now() - model.startedAt);
-        model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
-        model.outcome = "lose";
-        model.curtain = "card";
-        model.phase = "idle";
-        model.banner = "Karen reached the icons";
-        sfxLose();
-        closeRound(model, false, model.elapsed);
-        bump();
-        return;
-      }
+    const boss = model.boss;
+    if (!boss || boss.hp <= 0) return;
+    for (const event of stepBoss(boss, dt)) {
+      applyBossEvent(model, event);
+      if (model.outcome) return;
     }
     if (paint) bump();
   };
@@ -973,8 +1078,9 @@ export function SweetCare() {
     if (!model || runRef.current !== run || model.outcome) return;
     const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly) };
     const healed = model.level.encounter === "heal" && model.heal >= (model.level.healNeed ?? 1);
-    const cleared = model.level.encounter === "microbe" && model.germKills >= (model.level.swarm?.count ?? 1) && model.germs.length === 0;
-    const wonGoal = model.level.bossHp ? model.bossHp <= 0 : healed || cleared ? true : model.level.encounter ? false : goalsMet(model.level, progress);
+    // A leak costs life, not the ward: the wave is cleared once every germ has been dealt with.
+    const cleared = model.level.encounter === "microbe" && model.germLeft <= 0 && model.germs.length === 0;
+    const wonGoal = model.boss ? model.boss.hp <= 0 : healed || cleared ? true : model.level.encounter ? false : goalsMet(model.level, progress);
     if (wonGoal) {
       const bonus = model.moves * 100;
       if (bonus > 0) {
@@ -1082,6 +1188,22 @@ export function SweetCare() {
     const model = modelRef.current;
     if (!model || model.phase !== "idle" || model.outcome || model.moves <= 0) return;
     if (!adjacent(a, b)) return;
+    const stuck = [a, b].some((pos) => {
+      const tile = model.board[pos.r]?.[pos.c];
+      return Boolean(tile && model.locks.has(tile.id));
+    });
+    if (stuck) {
+      model.selected = null;
+      model.banner = "Taped down!";
+      sfxBad();
+      bump();
+      window.setTimeout(() => {
+        const current = modelRef.current;
+        if (current?.banner === "Taped down!") current.banner = null;
+        bump();
+      }, 700);
+      return;
+    }
     const run = runRef.current;
     unlockAudio();
     clearHint();
@@ -1771,7 +1893,8 @@ function Play({
   onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void;
 }) {
   const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly) };
-  const bossMax = model.level.bossHp ?? 0;
+  const boss = model.boss;
+  const bossMax = boss?.max ?? 0;
   const microbes = model.level.encounter === "microbe";
   const healing = model.level.encounter === "heal";
   const arena = bossMax > 0 || microbes || healing;
@@ -1779,7 +1902,7 @@ function Play({
   const germQuota = model.level.swarm?.count ?? 1;
   const healPct = Math.min(100, Math.round((model.heal / healNeed) * 100));
   const frac = bossMax
-    ? Math.max(0, 1 - model.bossHp / bossMax)
+    ? Math.max(0, 1 - (boss?.hp ?? 0) / bossMax)
     : healing
       ? Math.min(1, model.heal / healNeed)
       : microbes
@@ -1798,14 +1921,14 @@ function Play({
   const grid = (
     <>
       <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
-      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${bossMax > 0 && model.bossNear >= 98 ? " contact" : ""}`} style={{ width: arena ? "100%" : side, height: boardH }}>
+      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}`} style={{ width: arena ? "100%" : side, height: boardH }}>
         <div className="board" ref={boardRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
           <div className={`pieces${model.animate ? " anim" : ""}`}>
             {model.view.map((tile) => {
               const selected = model.selected?.r === tile.r && model.selected?.c === tile.c;
               const roll = model.rolls.find((item) => item.id === tile.id);
               return (
-                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
+                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", model.locks.has(tile.id) ? "taped" : "", model.marked.includes(tile.id) ? "marked" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
                   <img className="candy" src={spriteFor(tile)} alt="" draggable={false} />
                   {tile.special === "row" || tile.special === "col" ? <span className="shine" /> : null}
                   {tile.special === "bomb" ? <span className="ring" /> : null}
@@ -1857,13 +1980,19 @@ function Play({
         </div>
       </section>
       <ComboCounter live={model.dive} best={model.maxCombo} />
-      {bossMax > 0 ? (
-        <div className="boss-strip">
+      {boss ? (
+        <div className={`boss-strip phase-${boss.phase}${model.sting > 0 ? " stung" : ""}`}>
           <div className="boss-meters">
             <div>
-              <div className="meter-label"><span>Nurse Karen</span><span>{model.bossHp <= 0 ? "Down" : model.bossHp}</span></div>
-              <div className="boss-bar" role="meter" aria-label="Nurse Karen health" aria-valuenow={model.bossHp} aria-valuemin={0} aria-valuemax={bossMax}>
-                <span style={{ width: `${Math.round((model.bossHp / bossMax) * 100)}%` }} />
+              <div className="meter-label">
+                <span>{boss.profile.name}<i className="phase-pips" aria-label={`Phase ${boss.phase + 1} of 3`}>{[0, 1, 2].map((n) => <b key={n} className={n <= boss.phase ? "on" : ""} />)}</i></span>
+                <span>{boss.hp <= 0 ? "Down" : boss.guard > 0 ? "Guard" : boss.hp}</span>
+              </div>
+              <div className={`boss-bar${boss.guard > 0 ? " guarded" : ""}`} role="meter" aria-label={`${boss.profile.name} health`} aria-valuenow={boss.hp} aria-valuemin={0} aria-valuemax={bossMax}>
+                <em style={{ width: `${Math.round((boss.hp / bossMax) * 100)}%` }} />
+                <span style={{ width: `${Math.round((boss.hp / bossMax) * 100)}%` }} />
+                <s style={{ left: "33.3%" }} />
+                <s style={{ left: "66.6%" }} />
               </div>
             </div>
             <div>
@@ -1894,14 +2023,25 @@ function Play({
         </div>
       ) : null}
       <div className={`play-stage${arena ? " boss-stage" : ""}`} ref={arena ? undefined : slotRef}>
-        {bossMax > 0 ? (
-          <span ref={bossRef} className={`karen-walk${model.bossBump ? " flinch" : ""}${model.bossSlow > 0 ? " hurt" : ""}${model.bossHot > 0 ? " hot" : ""}`} style={{ left: `${6 + model.bossLane * 88}%`, top: `${model.bossNear * 0.58}%` }}>
-            {model.bossHot > 0 ? <span className="hot-line">I'm hot!</span> : null}
-            {model.bossHot > 0 ? <span className="steam" /> : null}
-            <span className="karen-fan">
-              <KarenWalk slow={model.bossSlow > 0 || model.bossHot > 0} facing={model.bossDir} paused={Boolean(model.outcome) || model.bossHp <= 0} />
+        {boss ? (
+          <>
+            <span className="danger-glow" aria-hidden style={{ opacity: Math.max(0, (boss.near - 55) / 45) }} />
+            {boss.action?.move === "charge" ? (
+              <span className="charge-lane" aria-hidden style={{ left: `${12 + boss.lane * 76}%`, top: `${boss.near * 0.58}%`, ["--wind" as string]: String(windupProgress(boss)) }} />
+            ) : null}
+            <span ref={bossRef} className={["karen-walk", boss.hot > 0 ? "hot" : "", boss.slow > 0 ? "hurt" : "", boss.action ? `winding ${boss.action.move}` : "", boss.guard > 0 ? "guard" : "", `phase-${boss.phase}`, boss.hp <= 0 ? "down" : ""].filter(Boolean).join(" ")} style={{ left: `${12 + boss.lane * 76}%`, top: `${boss.near * 0.58}%`, ["--depth" as string]: String(0.86 + boss.near * 0.0026) }}>
+              {boss.action ? (
+                <span className={`intent ${boss.action.move}`} role="status" style={{ ["--wind" as string]: String(windupProgress(boss)) }}>
+                  <i aria-hidden />
+                  {MOVE_LABEL[boss.action.move]}
+                </span>
+              ) : boss.hot > 0 ? <span className="hot-line">I'm hot!</span> : null}
+              {boss.hot > 0 || boss.action?.move === "coffee" ? <span className="steam" /> : null}
+              <span className="karen-fan">
+                <KarenWalk slow={boss.slow > 0 || boss.hot > 0} facing={boss.dir} paused={Boolean(model.outcome) || boss.hp <= 0 || Boolean(boss.action)} />
+              </span>
             </span>
-          </span>
+          </>
         ) : microbes ? (
           <>
             <div className="objectives">
@@ -1912,8 +2052,8 @@ function Play({
             {model.germs.map((germ) => {
               const lead = model.germs.reduce((best, item) => (item.y > best.y ? item : best));
               return (
-                <span key={germ.id} ref={germ.id === lead.id ? bossRef : undefined} className="germ" style={{ left: `${germ.x}%`, top: `${germ.y}%` }}>
-                  <img src={`/sprites/germ-${germ.sprite}.png`} alt="" />
+                <span key={germ.id} ref={germ.id === lead.id ? bossRef : undefined} className={["germ", germ.kind, germ.hurt > 0 ? "hit" : "", germ.tell > 0 ? "tell" : "", germ.dash > 0 ? "dash" : ""].filter(Boolean).join(" ")} style={{ left: `${germ.x}%`, top: `${germ.y}%` }}>
+                  <img src={germ.kind === "mother" ? "/sprites/germ-boss.png" : `/sprites/germ-${germ.sprite}.png`} alt="" />
                   <i style={{ width: `${Math.max(0, (germ.hp / germ.max) * 100)}%` }} />
                 </span>
               );
@@ -1990,6 +2130,7 @@ function KarenWalk({ slow, facing, paused }: { slow: boolean; facing: number; pa
     const ctx = canvas.getContext("2d");
     let raf = 0;
     let alive = true;
+    let box: { w: number; h: number } | null = null;
     const paint = () => {
       if (!alive) return;
       raf = requestAnimationFrame(paint);
@@ -2048,6 +2189,14 @@ function KarenWalk({ slow, facing, paused }: { slow: boolean; facing: number; pa
         }
       }
       if (maxX <= minX || maxY <= minY) return;
+      // Keep her scale steady mid-stride: the crop follows her center but its size only ever grows.
+      const span = Math.max(maxX - minX + 1, box?.w ?? 0);
+      const tall = Math.max(maxY - minY + 1, box?.h ?? 0);
+      box = { w: span, h: tall };
+      const mid = (minX + maxX) / 2;
+      minX = Math.max(0, Math.round(mid - span / 2));
+      maxX = Math.min(w - 1, minX + span - 1);
+      minY = Math.max(0, maxY - tall + 1);
       const cw = maxX - minX + 1;
       const ch = maxY - minY + 1;
       if (canvas.width !== cw || canvas.height !== ch) {
