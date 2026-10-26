@@ -1,6 +1,9 @@
 import type { Kind } from "./engine.ts";
 import { LEVELS, type Goal, type JellyPattern, type LevelDef } from "./levels.ts";
+import { formatGrid, parseGrid, type CellSpec } from "./layout.ts";
+import { SHAPES, shapesFor } from "./shapes.ts";
 import { hashText, shiftById, type ShiftId } from "./shifts.ts";
+import { targetRate, tune } from "./simulate.ts";
 
 const HOSPITAL: Kind[] = ["heart", "cross", "pill", "bandage", "nurse", "kit"];
 const CLINIC: Kind[] = ["heart", "cross", "kit", "teddy", "diaper", "bottle"];
@@ -36,10 +39,6 @@ function pick<T>(rng: () => number, list: readonly T[]): T {
   return list[Math.floor(rng() * list.length)]!;
 }
 
-function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, Math.round(n)));
-}
-
 function bossOf(id: number): string | null {
   if (id === 5) return "Code Blue";
   if (id === 10) return "The Overflow";
@@ -61,8 +60,20 @@ function weighted(kinds: Kind[], scarce: Kind | null): Kind[] {
   return bag;
 }
 
-/** Tutorial wards stay scripted. Every later ward is rolled from the attempt seed. */
+const cache = new Map<string, LevelDef>();
+
+/** Tutorial wards stay scripted. Every later ward is rolled from the attempt seed, then tuned by the bot. */
 export function generateWard(id: number, seed: number, shiftId: ShiftId = "fully-staffed"): LevelDef {
+  const key = `${id}|${seed}|${shiftId}`;
+  const hit = cache.get(key);
+  if (hit) return structuredClone(hit);
+  const level = rollWardDef(id, seed, shiftId);
+  if (cache.size > 64) cache.clear();
+  cache.set(key, level);
+  return structuredClone(level);
+}
+
+function rollWardDef(id: number, seed: number, shiftId: ShiftId): LevelDef {
   const base = LEVELS[id - 1] ?? LEVELS[0]!;
   if (id <= 2) {
     const shift = shiftById(shiftId);
@@ -74,91 +85,122 @@ export function generateWard(id: number, seed: number, shiftId: ShiftId = "fully
   const boss = bossOf(id);
   let kinds = wingKinds(id).slice();
   if (shift.id === "float-pool") kinds = otherWing(id, seed % 7).slice();
-  if (shift.id === "visitor-hour" && !kinds.includes("gift")) kinds = [...kinds, "gift"];
-  const kindCount = shift.id === "short-staffed" ? 4 : id < 8 ? 4 + (seed % 2) : 5;
+  let kindCount = shift.id === "short-staffed" ? 4 : id < 6 ? 5 : id >= 11 && seed % 3 === 0 ? 6 : 5;
+  if (shift.id === "visitor-hour") {
+    kinds = ["gift", ...kinds.filter((kind) => kind !== "gift")];
+    kindCount += 1;
+  }
   kinds = kinds.slice(0, Math.min(kinds.length, kindCount));
 
+  const shape = boss ? SHAPES[0]! : pick(rng, shapesFor(id));
+  const cells = parseGrid(shape.grid, base.rows, base.cols);
   let goals: Goal[];
   let jelly: JellyPattern = "none";
-  let moves = 18 + Math.floor(id * 0.8) + Math.floor(rng() * 5);
   let name = base.name;
+  let wraps = 0;
 
   if (boss === "Code Blue") {
     name = "Code Blue";
-    goals = [{ type: "collect", kind: "heart", count: 16 + (seed % 5) }];
-    moves -= 3;
+    goals = [{ type: "collect", kind: "heart", count: 30 + (seed % 5) }];
   } else if (boss === "The Overflow") {
     name = "The Overflow";
     jelly = "lower";
     goals = [
       { type: "jelly" },
-      { type: "collect", kind: kinds.includes("kit") ? "kit" : kinds[0]!, count: 10 + (seed % 4) },
+      { type: "collect", kind: kinds.includes("kit") ? "kit" : kinds[0]!, count: 18 + (seed % 4) },
     ];
-    moves += 4;
   } else if (boss === "Audit") {
     name = "Audit";
-    goals = [{ type: "score", target: 5200 + (seed % 8) * 250 }];
-    moves -= 4;
+    goals = [{ type: "score", target: 16000 + (seed % 8) * 250 }];
   } else if (shift.id === "night-shift") {
-    goals = [{ type: "score", target: 2800 + id * 180 + (seed % 6) * 200 }];
-    moves -= 1;
+    goals = [{ type: "score", target: 7000 + id * 700 + (seed % 6) * 200 }];
   } else if (shift.id === "spill-risk") {
     jelly = jellyFor(rng);
     goals = [{ type: "jelly" }];
-    if (rng() < 0.45) goals.push({ type: "collect", kind: pick(rng, kinds), count: 8 + (seed % 5) });
-    moves += 4;
+    if (rng() < 0.45) goals.push({ type: "collect", kind: pick(rng, kinds), count: 16 + (seed % 5) });
   } else {
-    const family = seed % 5;
+    const family = id >= 7 ? seed % 6 : seed % 5;
     if (family === 0) {
-      goals = [{ type: "collect", kind: pick(rng, kinds), count: 12 + (id % 5) }];
+      goals = [{ type: "collect", kind: pick(rng, kinds), count: 26 + id * 2 + (seed % 4) }];
     } else if (family === 1) {
       const a = pick(rng, kinds);
-      const b = pick(rng, kinds.filter((kind) => kind !== a).concat(kinds));
+      const b = pick(rng, kinds.filter((kind) => kind !== a));
       goals = [
-        { type: "collect", kind: a, count: 8 + (seed % 4) },
-        { type: "collect", kind: b, count: 8 + ((seed >> 3) % 4) },
+        { type: "collect", kind: a, count: 16 + id + (seed % 4) },
+        { type: "collect", kind: b, count: 16 + id + ((seed >> 3) % 4) },
       ];
     } else if (family === 2) {
       jelly = jellyFor(rng);
       goals = [{ type: "jelly" }];
-      moves += 3;
     } else if (family === 3) {
-      goals = [{ type: "score", target: 2400 + id * 160 }];
-    } else {
+      goals = [{ type: "score", target: 6000 + id * 700 }];
+    } else if (family === 4) {
       jelly = pick(rng, ["bottom", "checker", "lower"] as const);
       goals = [
         { type: "jelly" },
-        { type: "collect", kind: pick(rng, kinds), count: 8 + (seed % 4) },
+        { type: "collect", kind: pick(rng, kinds), count: 16 + id + (seed % 4) },
       ];
-      moves += 5;
+    } else {
+      wraps = 6 + Math.floor(id / 2) + (seed % 3);
+      goals = [{ type: "wraps" }];
+      if (rng() < 0.5) goals.push({ type: "collect", kind: pick(rng, kinds), count: 14 + id + (seed % 4) });
     }
   }
 
-  if (shift.id === "short-staffed") moves -= 2;
-  moves = clamp(moves, 16, 42);
+  if (!wraps && id >= 9 && !boss && rng() < 0.4) wraps = 2 + (seed % 3);
+  if (wraps) scatterWraps(cells, wraps, id >= 12 ? 0.35 : 0, rng);
 
   const scarce = shift.id === "supply-shortage" ? goalKind(goals) : null;
   const dealt = weighted(kinds, scarce);
-  const star2 = Math.round(moves * (shift.id === "night-shift" ? 150 : 120));
-  const star3 = Math.round(star2 * (shift.id === "night-shift" ? 1.55 : 1.45));
-
-  return {
+  const startSpecial = shift.id === "in-service" ? pick(rng, ["row", "col", "bomb"] as const) : null;
+  const draft: LevelDef = {
     id,
     name,
     rows: base.rows,
     cols: base.cols,
     kinds: dealt,
-    moves,
+    moves: 30,
     goals,
-    star2,
-    star3,
+    star2: 0,
+    star3: 0,
     jelly,
+    grid: formatGrid(cells),
     seed,
     shiftId: shift.id,
     shiftLabel: shift.label,
     boss,
-    startSpecial: shift.id === "in-service" ? pick(rng, ["row", "col", "bomb"] as const) : null,
+    startSpecial,
   };
+  let target = targetRate(id);
+  if (shift.id === "short-staffed") target -= 0.08;
+  const tuned = tune(draft, Math.max(0.4, target), 10, seed % 9973);
+  const lift = shift.id === "night-shift" ? 1.12 : 1;
+  return {
+    ...draft,
+    moves: tuned.moves,
+    star2: Math.round(tuned.star2 * lift),
+    star3: Math.round(tuned.star3 * lift),
+  };
+}
+
+/** Wraps go in mirrored pairs so a board reads as designed, not sprinkled. */
+function scatterWraps(cells: CellSpec[][], count: number, doubleChance: number, rng: () => number) {
+  const rows = cells.length;
+  const cols = cells[0]?.length ?? 0;
+  const spots: { r: number; c: number }[] = [];
+  for (let r = 1; r < rows - 1; r++) for (let c = 0; c < Math.ceil(cols / 2); c++) if (!cells[r]![c]!.hole) spots.push({ r, c });
+  let placed = 0;
+  for (let guard = 0; placed < count && guard < 80 && spots.length; guard++) {
+    const spot = spots.splice(Math.floor(rng() * spots.length), 1)[0]!;
+    const layers: 1 | 2 = rng() < doubleChance ? 2 : 1;
+    const twin = { r: spot.r, c: cols - 1 - spot.c };
+    for (const at of twin.c === spot.c ? [spot] : [spot, twin]) {
+      const cell = cells[at.r]![at.c]!;
+      if (cell.hole || cell.wrap) continue;
+      cell.wrap = layers;
+      placed += 1;
+    }
+  }
 }
 
 function goalKind(goals: Goal[]): Kind | null {

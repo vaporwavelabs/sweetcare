@@ -24,6 +24,7 @@ export function LiquidBoard({
   rows,
   cols,
   jelly,
+  holes,
   revision,
   scene,
   frame,
@@ -32,6 +33,8 @@ export function LiquidBoard({
   rows: number;
   cols: number;
   jelly: boolean[][];
+  /** Playable cells. A false cell is a hole and gets no cushion. */
+  holes?: boolean[][];
   revision: number;
   scene: string;
   frame: { x: number; y: number; w: number; h: number };
@@ -40,6 +43,8 @@ export function LiquidBoard({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const jellyRef = useRef(jelly);
   jellyRef.current = jelly;
+  const holesRef = useRef(holes);
+  holesRef.current = holes;
   const simRef = useRef<RippleSim | null>(null);
   if (!simRef.current) simRef.current = new RippleSim(104);
   const drawRef = useRef<() => void>(() => {});
@@ -88,6 +93,7 @@ export function LiquidBoard({
       const w = canvas.width;
       const h = canvas.height;
       const gel = jellyRef.current;
+      const open = holesRef.current;
       const frameNow = frameRef.current;
       const gx = frameNow.x * w;
       const gy = frameNow.y * h;
@@ -144,6 +150,7 @@ export function LiquidBoard({
       ctx.filter = `blur(${Math.max(4, cw * 0.05)}px)`;
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
+          if (open?.[r]?.[c] === false) continue;
           const cx = gx + (c + 0.5) * cw;
           const cy = gy + (r + 0.5) * ch;
           const grow = 1.04 + ((r * 3 + c) % 3) * 0.02;
@@ -180,6 +187,7 @@ export function LiquidBoard({
 
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
+          if (open?.[r]?.[c] === false) continue;
           const cx = gx + (c + 0.5) * cw;
           const cy = gy + (r + 0.5) * ch;
           const rx = cw * 0.48;

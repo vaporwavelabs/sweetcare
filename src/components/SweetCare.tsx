@@ -10,6 +10,7 @@ import {
   collapse,
   comboLabel,
   commitSwap,
+  countWraps,
   createBoard,
   diveFavor,
   eraseIds,
@@ -26,6 +27,7 @@ import {
   type Board,
   type ClearPlan,
   type Kind,
+  type Mask,
   type Pos,
   type Rng,
   type Special,
@@ -38,10 +40,14 @@ import {
   countJelly,
   freshCollected,
   getLevel,
+  goalChips,
   goalFraction,
   goalsMet,
   journeyFor,
+  levelCells,
+  levelMask,
   makeJelly,
+  sceneFor,
   starsFor,
   wardsOpen,
   WARD_IDS,
@@ -75,7 +81,9 @@ import { generateWard } from "@/game/generator";
 import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
 import { shiftForDate } from "@/game/shifts";
 import { installErrorLog, note, readNotes, subscribeNotes, type Note } from "@/game/log";
+import { applyLayout } from "@/game/layout";
 import { LiquidBoard, type LiquidHandle } from "@/components/LiquidBoard";
+import { LevelCreator } from "@/components/LevelCreator";
 import { ParticleLayer, type ParticleHandle } from "@/components/ParticleLayer";
 
 interface VTile {
@@ -86,6 +94,7 @@ interface VTile {
   c: number;
   dying: boolean;
   born: boolean;
+  wrap: number;
 }
 
 interface FloatText {
@@ -115,6 +124,9 @@ function splitScore(cells: Pos[], board: Board, gained: number) {
 interface Model {
   level: LevelDef;
   board: Board;
+  /** Playable cells. Absent on a full rectangle. */
+  mask?: Mask;
+  wrapsTotal: number;
   jelly: boolean[][];
   jellyTotal: number;
   rng: Rng;
@@ -159,7 +171,7 @@ interface Model {
   heal: number;
 }
 
-type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "cast" | "dev";
+type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "cast" | "dev" | "creator";
 
 type Germ = { id: number; sprite: number; x: number; y: number; hp: number; max: number };
 
@@ -204,6 +216,7 @@ function readView(board: Board, dying: Set<number>, born: Set<number>, lift?: Ma
         c,
         dying: dying.has(tile.id),
         born: born.has(tile.id),
+        wrap: tile.wrap ?? 0,
       });
     }
   }
@@ -269,6 +282,7 @@ export function SweetCare() {
   const [cell, setCell] = useState(36);
   const [frame, setFrame] = useState({ x: 0, y: 0, w: 1, h: 1 });
   const [journeyId, setJourneyId] = useState(1);
+  const [creatorUid, setCreatorUid] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [logOpen, setLogOpen] = useState(false);
   const forcedOpen = useRef(0);
@@ -330,13 +344,15 @@ export function SweetCare() {
         setFrame({ x: 0, y: 0, w: 1, h: 1 });
         return;
       }
-      const next = Math.max(160, Math.floor(Math.min(rect.width, rect.height)));
+      const aspect = playing ? playing.level.rows / playing.level.cols : 1;
+      const next = Math.max(160, Math.floor(Math.min(rect.width, rect.height / aspect)));
+      const tall = next * aspect;
       setSide(next);
       setFrame({
         x: (width - next) / 2 / width,
-        y: (height - next) / 2 / height,
+        y: (height - tall) / 2 / height,
         w: next / width,
-        h: next / height,
+        h: tall / height,
       });
     };
     apply();
@@ -514,7 +530,7 @@ export function SweetCare() {
     bump();
   }
 
-  function startLevel(id: number) {
+  function startLevel(id: number, custom?: LevelDef) {
     try {
       unlockAudio();
       sfxClick();
@@ -527,18 +543,21 @@ export function SweetCare() {
     const run = ++runRef.current;
     shuffles.current = 0;
     try {
-    const attempt = attemptFor(saveRef.current, id);
+    const attempt = custom ? { save: saveRef.current, seed: Math.floor(Math.random() * 2 ** 31), shiftId: "fully-staffed" as const } : attemptFor(saveRef.current, id);
     if (attempt.save !== saveRef.current) {
       saveRef.current = attempt.save;
       writeSave(attempt.save);
       setSave(attempt.save);
     }
-    const scripted = getLevel(id);
-    const level = scripted.bossHp || scripted.encounter || id >= 16
+    const scripted = custom ?? getLevel(id);
+    const level = custom || scripted.bossHp || scripted.encounter || id >= 16
       ? scripted
       : generateWard(id, attempt.seed, attempt.shiftId);
     const rng = mulberry32((attempt.seed ^ (id * 9973)) >>> 0);
-    const board = createBoard(rng, level.rows, level.cols, level.kinds);
+    const mask = levelMask(level);
+    const board = createBoard(rng, level.rows, level.cols, level.kinds, mask);
+    const cells = levelCells(level);
+    if (cells) applyLayout(board, cells);
     if (level.startSpecial) {
       const mid = board[Math.floor(level.rows / 2)]?.[Math.floor(level.cols / 2)];
       if (mid) mid.special = level.startSpecial;
@@ -547,6 +566,8 @@ export function SweetCare() {
     const model: Model = {
       level,
       board,
+      mask,
+      wrapsTotal: countWraps(board),
       jelly,
       jellyTotal: countJelly(jelly),
       rng,
@@ -622,12 +643,13 @@ export function SweetCare() {
   }
 
   function leavePlay() {
+    const custom = modelRef.current?.level.custom;
     runRef.current += 1;
     clearHint();
     clearCurtain();
     stopCelebration();
     modelRef.current = null;
-    setScreen("map");
+    setScreen(custom ? "creator" : "map");
   }
 
   function goHome() {
@@ -849,7 +871,7 @@ export function SweetCare() {
     }
     eraseIds(model.board, painted.dyingIds);
     const spent = model.assist;
-    const fell = collapse(model.board, model.rng, model.level.kinds, diveFavor(model.level.id, spent));
+    const fell = collapse(model.board, model.rng, model.level.kinds, diveFavor(model.level.id, spent), model.mask);
     if (spent) model.assist = false;
     model.board = fell.board;
     const lift = new Map<number, number>();
@@ -879,6 +901,11 @@ export function SweetCare() {
   }
 
   function closeRound(model: Model, won: boolean, elapsed: number) {
+    if (model.level.custom) {
+      model.rankedUp = false;
+      model.savedNow = false;
+      return;
+    }
     const prev = saveRef.current;
     const key = String(model.level.id);
     const destroyed = KINDS.reduce((sum, kind) => sum + model.collected[kind], 0);
@@ -971,7 +998,7 @@ export function SweetCare() {
   async function finish(run: number) {
     const model = modelRef.current;
     if (!model || runRef.current !== run || model.outcome) return;
-    const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly) };
+    const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly), wrapsLeft: countWraps(model.board) };
     const healed = model.level.encounter === "heal" && model.heal >= (model.level.healNeed ?? 1);
     const cleared = model.level.encounter === "microbe" && model.germKills >= (model.level.swarm?.count ?? 1) && model.germs.length === 0;
     const wonGoal = model.level.bossHp ? model.bossHp <= 0 : healed || cleared ? true : model.level.encounter ? false : goalsMet(model.level, progress);
@@ -1251,6 +1278,7 @@ export function SweetCare() {
           onMap={() => { sfxClick(); setScreen("map"); }}
           onSettings={() => { sfxClick(); setScreen("settings"); }}
           onDev={() => { sfxClick(); setScreen("dev"); }}
+          onCreator={() => { sfxClick(); setScreen("creator"); }}
           onSound={toggleSound}
           onProfile={openProfile}
           notes={notes}
@@ -1265,6 +1293,16 @@ export function SweetCare() {
           onStart={(look, name) => {
             patchSave((prev) => ({ ...prev, career: { ...prev.career, look, name } }), "settings");
             openLevel(1);
+          }}
+        />
+      ) : null}
+      {screen === "creator" ? (
+        <LevelCreator
+          initialUid={creatorUid}
+          onBack={() => setScreen("home")}
+          onPlay={(level, uid) => {
+            setCreatorUid(uid);
+            startLevel(level.id, level);
           }}
         />
       ) : null}
@@ -1307,8 +1345,8 @@ export function SweetCare() {
           onCancel={cancelAim}
           onArm={arm}
           onAdvance={advanceCurtain}
-          onRetry={() => startLevel(model.level.id)}
-          onNext={() => (model.level.id === 5 ? setScreen("map") : openLevel(model.level.id + 1))}
+          onRetry={() => startLevel(model.level.id, model.level.custom ? model.level : undefined)}
+          onNext={() => (model.level.custom ? leavePlay() : model.level.id === 5 ? setScreen("map") : openLevel(model.level.id + 1))}
           onHome={goHome}
           onCollect={collectGift}
           onPointerDown={(event) => {
@@ -1402,7 +1440,7 @@ function ShiftChip() {
   );
 }
 
-function Home({ save, onNew, onContinue, onMap, onSettings, onDev, onSound, onProfile, notes, logOpen, onToggleLog }: { save: SaveData; onNew: () => void; onContinue: () => void; onMap: () => void; onSettings: () => void; onDev: () => void; onSound: () => void; onProfile: () => void; notes: Note[]; logOpen: boolean; onToggleLog: () => void }) {
+function Home({ save, onNew, onContinue, onMap, onSettings, onDev, onCreator, onSound, onProfile, notes, logOpen, onToggleLog }: { save: SaveData; onNew: () => void; onContinue: () => void; onMap: () => void; onSettings: () => void; onDev: () => void; onCreator: () => void; onSound: () => void; onProfile: () => void; notes: Note[]; logOpen: boolean; onToggleLog: () => void }) {
   const played = save.unlocked > 1 || Object.values(save.stars).some((n) => n > 0);
   return (
     <div className="column home">
@@ -1431,6 +1469,7 @@ function Home({ save, onNew, onContinue, onMap, onSettings, onDev, onSound, onPr
           <button className="btn" type="button" onClick={onNew}>New Game</button>
           <button className="btn" type="button" onClick={onContinue} disabled={!played}>Continue</button>
           <button className="btn secondary" type="button" onClick={onMap}>World map</button>
+          <button className="btn secondary" type="button" onClick={onCreator}>Level creator</button>
           <button className="btn secondary" type="button" onClick={onSettings}>Settings</button>
           <button className="btn secondary" type="button" onClick={onDev}>Dev</button>
           <button className="btn secondary" type="button" onClick={onToggleLog}>Launch log{notes.length ? ` (${notes.length})` : ""}</button>
@@ -1770,7 +1809,7 @@ function Play({
   onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void;
 }) {
-  const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly) };
+  const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly), wrapsLeft: countWraps(model.board) };
   const bossMax = model.level.bossHp ?? 0;
   const microbes = model.level.encounter === "microbe";
   const healing = model.level.encounter === "heal";
@@ -1784,20 +1823,21 @@ function Play({
       ? Math.min(1, model.heal / healNeed)
       : microbes
         ? Math.min(1, model.germKills / germQuota)
-        : goalFraction(model.level, progress, model.jellyTotal);
+        : goalFraction(model.level, progress, model.jellyTotal, model.wrapsTotal);
+  const chips = arena ? [] : goalChips(model.level, progress, model.jellyTotal, model.wrapsTotal);
   const best = save.best[String(model.level.id)] ?? 0;
   const hintKeys = new Set((model.hint ?? []).map((pos) => keyOf(pos)));
   const icon = cell * 1.08;
   const scoreRef = useRef<HTMLElement | null>(null);
   const bossRef = useRef<HTMLElement | null>(null);
   const [kitOpen, setKitOpen] = useState(false);
-  const scene = bossMax ? "/scenes/boss.jpg" : arena ? "/scenes/care.jpg" : `/scenes/${String(model.level.id).padStart(2, "0")}.jpg`;
+  const scene = bossMax ? "/scenes/boss.jpg" : arena ? "/scenes/care.jpg" : `/scenes/${String(sceneFor(model.level)).padStart(2, "0")}.jpg`;
   const cols = model.level.cols;
   const rows = model.level.rows;
-  const boardH = arena ? Math.round(side * rows / cols) : side;
+  const boardH = Math.round(side * rows / cols);
   const grid = (
     <>
-      <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
+      <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} holes={model.mask} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
       <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${bossMax > 0 && model.bossNear >= 98 ? " contact" : ""}`} style={{ width: arena ? "100%" : side, height: boardH }}>
         <div className="board" ref={boardRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
           <div className={`pieces${model.animate ? " anim" : ""}`}>
@@ -1805,10 +1845,11 @@ function Play({
               const selected = model.selected?.r === tile.r && model.selected?.c === tile.c;
               const roll = model.rolls.find((item) => item.id === tile.id);
               return (
-                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
+                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", tile.wrap ? `wrapped wrap-${tile.wrap}` : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
                   <img className="candy" src={spriteFor(tile)} alt="" draggable={false} />
                   {tile.special === "row" || tile.special === "col" ? <span className="shine" /> : null}
                   {tile.special === "bomb" ? <span className="ring" /> : null}
+                  {tile.wrap ? <span className="wrap-band" aria-hidden /> : null}
                 </div>
               );
             })}
@@ -1839,13 +1880,23 @@ function Play({
       </div>
       <section className="crush-hud">
         <div className="level-slab">
-          <b className="lvl-num">{model.level.id}</b>
+          <b className="lvl-num">{model.level.custom ? "✎" : model.level.id}</b>
           <div className="lvl-copy">
             <div className="lvl-kicker">{model.level.shiftLabel ?? "Level"} {model.level.boss ? `· ${model.level.boss}` : ""}</div>
             <div className="lvl-name">{model.level.name}</div>
             <div className="bar" aria-hidden><span style={{ width: `${Math.round(frac * 100)}%` }} /></div>
           </div>
         </div>
+        {chips.length ? (
+          <ul className="goal-chips" aria-label="Goals">
+            {chips.map((chip) => (
+              <li key={chip.key} className={chip.done ? "done" : ""}>
+                {chip.kind ? <img src={`/sprites/${chip.kind}.png`} alt={chip.kind} /> : <i className={chip.jelly ? "chip-jelly" : chip.wrap ? "chip-wrap" : "chip-score"} aria-label={chip.jelly ? "Jelly" : chip.wrap ? "Wraps" : "Score"} />}
+                <span>{chip.label}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="score-slab">
           <div className="hs-col">
             <span className="kicker">High Score</span>
@@ -2212,7 +2263,7 @@ function Outro({
   onCollect: (levelId: number) => void;
 }) {
   const won = model.outcome === "win";
-  const pending = won && !(save.openedGifts ?? []).includes(model.level.id);
+  const pending = won && !model.level.custom && !(save.openedGifts ?? []).includes(model.level.id);
   const [giftPhase, setGiftPhase] = useState<"box" | "open" | "kept">(pending ? "box" : "kept");
   const openGift = () => {
     unlockAudio();
@@ -2270,7 +2321,7 @@ function Outro({
           <button className="btn" type="button" onClick={onNext}>Play next level</button>
         ) : null}
         <button className="btn secondary" type="button" onClick={onRetry}>Replay last game</button>
-        <button className="btn secondary" type="button" onClick={onBack}>World map</button>
+        <button className="btn secondary" type="button" onClick={onBack}>{model.level.custom ? "Back to editor" : "World map"}</button>
         <button className="btn secondary" type="button" onClick={onProfile}>Profile</button>
         <button className="btn secondary" type="button" onClick={onHome}>Main menu</button>
       </div>
