@@ -6,6 +6,7 @@ import {
   countWraps,
   createBoard,
   diveFavor,
+  trackAssist,
   eraseIds,
   hasMove,
   mulberry32,
@@ -173,7 +174,7 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
     score: 0,
     moves: level.moves,
     collected: freshCollected(),
-    assist: level.id >= 3,
+    assist: false,
     form: 0,
   };
   let shuffles = 0;
@@ -203,13 +204,6 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
     if (!swap) break;
     commitSwap(state.board, swap[0], swap[1]);
     state.moves -= 1;
-    if (level.id >= 3 && !state.assist) {
-      state.form += 1;
-      if (state.form >= 2) {
-        state.assist = true;
-        state.form = 0;
-      }
-    }
     let plan = planAfterSwap(state.board, swap[0], swap[1], 1);
     let combo = 1;
     while (plan) {
@@ -217,6 +211,7 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
       combo += 1;
       plan = planFromMatches(state.board, combo);
     }
+    trackAssist(state, level.id, combo > 2);
   }
   const won = goalsMet(level, progressOf(state));
   const goalScore = state.score;

@@ -166,7 +166,7 @@ describe("sweet care match-3", () => {
     assert.equal(comboWeight(8), 11);
     assert.equal(diveFavor(1, true), 0);
     assert.equal(diveFavor(3, false), 0);
-    assert.equal(diveFavor(3, true), 2);
+    assert.equal(diveFavor(3, true), 4);
     assert.equal(comboLabel(6), "Deep dive!");
     assert.equal(comboLabel(7), "Faaah!");
     assert.equal(comboLabel(9), "Abyss!");

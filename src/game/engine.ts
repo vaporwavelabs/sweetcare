@@ -307,9 +307,32 @@ export function comboWeight(combo: number): number {
 }
 
 /** One assisted refill. Only level 3 and up, and only while a charge is armed. */
+/** How many moves in a row without a cascade before the refill helper steps in. */
+export const DRY_SPELL = 3;
+
+/**
+ * The refill helper is a catch-up aid, not a combo machine: from level 3 it arms only after a
+ * dry spell (moves that set off no cascade), and an armed refill nudges new tiles rather than
+ * rigging them.
+ */
 export function diveFavor(levelId: number, armed: boolean): number {
   if (levelId < 3 || !armed) return 0;
-  return 2;
+  return 4;
+}
+
+export interface AssistState {
+  assist: boolean;
+  form: number;
+}
+
+/** Call once a move has finished resolving. `cascaded` is true when it chained two or more clears. */
+export function trackAssist(state: AssistState, levelId: number, cascaded: boolean): void {
+  if (levelId < 3 || state.assist) return;
+  state.form = cascaded ? 0 : state.form + 1;
+  if (state.form >= DRY_SPELL) {
+    state.assist = true;
+    state.form = 0;
+  }
 }
 
 export function comboLabel(combo: number): string | null {

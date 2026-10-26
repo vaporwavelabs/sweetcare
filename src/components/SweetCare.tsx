@@ -13,6 +13,7 @@ import {
   countWraps,
   createBoard,
   diveFavor,
+  trackAssist,
   eraseIds,
   findHint,
   hasMove,
@@ -648,7 +649,7 @@ export function SweetCare() {
       flash: null,
       countdown: null,
       dive: 0,
-      assist: level.id >= 3,
+      assist: false,
       form: 0,
       startedAt: Date.now(),
       maxCombo: 0,
@@ -1256,7 +1257,8 @@ export function SweetCare() {
     bump();
   }
 
-  async function runClears(run: number, first: ClearPlan | null, comboStart: number) {
+  /** Plays a move's clears and cascades, and returns how many clear steps it took. */
+  async function runClears(run: number, first: ClearPlan | null, comboStart: number): Promise<number> {
     let combo = comboStart;
     let plan = first;
     let celebrated = false;
@@ -1281,7 +1283,7 @@ export function SweetCare() {
       const current = modelRef.current;
       if (current) current.maxCombo = Math.max(current.maxCombo, Math.max(step, plan.combo));
       await playPlan(run, plan);
-      if (runRef.current !== run || !modelRef.current) return;
+      if (runRef.current !== run || !modelRef.current) return step;
       combo += 1;
       plan = planFromMatches(modelRef.current.board, combo);
     }
@@ -1290,6 +1292,7 @@ export function SweetCare() {
       bump();
     }
     await finish(run);
+    return step;
   }
 
   async function playSwap(a: Pos, b: Pos) {
@@ -1353,15 +1356,9 @@ export function SweetCare() {
     }
     model.moves -= 1;
     model.rolls = [];
-    if (model.level.id >= 3 && !model.assist) {
-      model.form += 1;
-      if (model.form >= 2) {
-        model.assist = true;
-        model.form = 0;
-      }
-    }
     bump();
-    await runClears(run, planAfterSwap(model.board, a, b, 1), 1);
+    const steps = await runClears(run, planAfterSwap(model.board, a, b, 1), 1);
+    if (runRef.current === run && modelRef.current) trackAssist(modelRef.current, modelRef.current.level.id, steps >= 2);
   }
 
   function handleTap(pos: Pos) {
