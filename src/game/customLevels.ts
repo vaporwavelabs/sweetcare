@@ -1,5 +1,6 @@
 import { KINDS, type Kind, type Power } from "./engine.ts";
-import { MAX_SIDE, MIN_SIDE, formatGrid, openCount, parseGrid } from "./layout.ts";
+import { MAX_FUSE, MAX_SIDE, MIN_FUSE, MIN_SIDE, formatGrid, openCount, parseGrid } from "./layout.ts";
+import type { FeverRule } from "./mechanics.ts";
 import { countJelly, makeJelly, type Goal, type LevelDef } from "./levels.ts";
 
 /** A level made in the level creator. Stored on this device and shared as a text code. */
@@ -16,6 +17,8 @@ export interface CustomLevel {
   grid: string[];
   scene: number;
   startSpecial: Power | null;
+  /** New fevers break out every few moves. Null turns outbreaks off. */
+  fever: FeverRule | null;
   updatedAt: number;
 }
 
@@ -53,8 +56,17 @@ export function blankLevel(): CustomLevel {
     grid: formatGrid(parseGrid(undefined, 6, 6)),
     scene: 1,
     startSpecial: null,
+    fever: null,
     updatedAt: Date.now(),
   };
+}
+
+function cleanFever(raw: unknown): FeverRule | null {
+  if (!raw || typeof raw !== "object") return null;
+  const rule = raw as Record<string, unknown>;
+  const every = clampInt(rule.every, 0, 20, 0);
+  if (!every) return null;
+  return { every, fuse: clampInt(rule.fuse, MIN_FUSE, MAX_FUSE, 8) };
 }
 
 function cleanGoal(raw: unknown, kinds: Kind[]): Goal | null {
@@ -62,6 +74,8 @@ function cleanGoal(raw: unknown, kinds: Kind[]): Goal | null {
   const goal = raw as Record<string, unknown>;
   if (goal.type === "jelly") return { type: "jelly" };
   if (goal.type === "wraps") return { type: "wraps" };
+  if (goal.type === "contagion") return { type: "contagion" };
+  if (goal.type === "fevers") return { type: "fevers", count: clampInt(goal.count, 1, 60, 4) };
   if (goal.type === "score") return { type: "score", target: clampInt(goal.target, 500, 200000, 5000) };
   if (goal.type === "collect" && typeof goal.kind === "string" && KIND_SET.has(goal.kind)) {
     const kind = goal.kind as Kind;
@@ -99,6 +113,7 @@ export function cleanLevel(raw: unknown): CustomLevel {
     grid: formatGrid(parseGrid(grid, rows, cols)),
     scene: clampInt(data.scene, 1, 15, 1),
     startSpecial: POWERS.includes(data.startSpecial as Power) ? (data.startSpecial as Power) : null,
+    fever: cleanFever(data.fever),
     updatedAt: clampInt(data.updatedAt, 0, Number.MAX_SAFE_INTEGER, Date.now()),
   };
 }
@@ -119,6 +134,7 @@ export function toLevelDef(level: CustomLevel): LevelDef {
     scene: level.scene,
     shiftLabel: "Custom ward",
     startSpecial: level.startSpecial,
+    fever: level.fever,
     custom: true,
   };
 }
@@ -133,7 +149,15 @@ export function checkLevel(level: CustomLevel): Issue[] {
   const def = toLevelDef(level);
   const jelly = countJelly(makeJelly(def));
   let wraps = 0;
-  for (const row of cells) for (const cell of row) wraps += cell.wrap;
+  let infected = 0;
+  let fevers = 0;
+  for (const row of cells) {
+    for (const cell of row) {
+      wraps += cell.wrap;
+      if (cell.contagion) infected += 1;
+      if (cell.fuse) fevers += 1;
+    }
+  }
 
   if (open < 12) issues.push({ level: "error", text: "The board needs at least 12 open cells." });
   if (level.kinds.length < MIN_KINDS) issues.push({ level: "error", text: `Pick at least ${MIN_KINDS} supplies.` });
@@ -142,7 +166,11 @@ export function checkLevel(level: CustomLevel): Issue[] {
     if (goal.type === "collect" && !level.kinds.includes(goal.kind)) issues.push({ level: "error", text: `The ${goal.kind} goal can never fill: ${goal.kind} is not on the board.` });
     if (goal.type === "jelly" && jelly === 0) issues.push({ level: "error", text: "There is a jelly goal but no jelly on the board." });
     if (goal.type === "wraps" && wraps === 0) issues.push({ level: "error", text: "There is a wrap goal but no wrapped tiles on the board." });
+    if (goal.type === "contagion" && infected === 0) issues.push({ level: "error", text: "There is a contagion goal but no contagion on the board." });
+    if (goal.type === "fevers" && !level.fever && fevers < goal.count) issues.push({ level: "error", text: `The fever goal needs ${goal.count} fevers. Place more fever tiles or turn on outbreaks.` });
   }
+  if (infected > 0 && infected * 3 > open) issues.push({ level: "warn", text: "Contagion covers over a third of the board. It may spread faster than anyone can clean it." });
+  if (level.fever && level.fever.fuse <= level.fever.every) issues.push({ level: "warn", text: "Fevers break out faster than they burn down. Expect several at once." });
   if (level.star3 <= level.star2) issues.push({ level: "error", text: "Three stars must need more score than two." });
   if (jelly > 0 && !level.goals.some((goal) => goal.type === "jelly")) issues.push({ level: "warn", text: "Jelly is on the board but no goal asks for it. It only adds score." });
   if (wraps > 0 && !level.goals.some((goal) => goal.type === "wraps")) issues.push({ level: "warn", text: "Wrapped tiles are on the board but no goal asks for them." });

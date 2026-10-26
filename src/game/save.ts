@@ -3,6 +3,7 @@ import { previewSeed } from "./generator.ts";
 import { dayKey, shiftForDate, type ShiftId } from "./shifts.ts";
 import { defaultPrefs, readPrefs, type Prefs } from "./prefs.ts";
 import { defaultWallet, readWallet, type Wallet } from "./rewards.ts";
+import { FORM_SIZE, type FormEntry } from "./wardEvolution.ts";
 
 export interface DecorPin {
   id: string;
@@ -38,6 +39,8 @@ export interface SaveData {
   decor: DecorPin[];
   prefs: Prefs;
   wallet: Wallet;
+  /** Last few campaign goal-ward results. Rolled wards evolve easier or harder from it. */
+  form: FormEntry[];
 }
 
 const KEY = "sweet-care-save-v1";
@@ -45,7 +48,7 @@ const KEY = "sweet-care-save-v1";
 const LAST_LEVEL = 30;
 
 export function defaultSave(): SaveData {
-  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [], prefs: defaultPrefs(), wallet: defaultWallet() };
+  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [], prefs: defaultPrefs(), wallet: defaultWallet(), form: [] };
 }
 
 export function rememberOpened(opened: number[] | undefined, levelId: number): number[] {
@@ -87,6 +90,7 @@ export function loadSave(): SaveData {
       decor: readDecor(parsed.decor),
       prefs: readPrefs(parsed.prefs),
       wallet: readWallet(parsed.wallet),
+      form: readForm(parsed.form),
     };
   } catch {
     return defaultSave();
@@ -195,6 +199,20 @@ export function recordWin(save: SaveData, levelId: number, stars: number, score:
   if (levelId >= next.unlocked && levelId < 15) next.unlocked = levelId + 1;
   if (levelId === 5) next.loot = true;
   return next;
+}
+
+function readForm(value: unknown): FormEntry[] {
+  if (!Array.isArray(value)) return [];
+  const out: FormEntry[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") continue;
+    const entry = item as Partial<FormEntry>;
+    const id = Number(entry.id);
+    const spare = Number(entry.spare);
+    if (!Number.isFinite(id) || !Number.isFinite(spare)) continue;
+    out.push({ id, won: entry.won === true, spare: Math.max(0, Math.min(1, spare)) });
+  }
+  return out.slice(-FORM_SIZE);
 }
 
 function readDecor(value: unknown): DecorPin[] {
