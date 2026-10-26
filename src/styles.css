@@ -4031,3 +4031,20 @@ button.outro {
   font-weight: 600;
   opacity: 0.65;
 }
+
+.pause-actions .btn:not(.secondary) {
+  color: var(--color-cream);
+  background: var(--color-pink-deep);
+  box-shadow: 0 0.32rem 0 #a20d57;
+}
+
+/* Jelly in an arena (The Overflow). The liquid board sits under the white icon panel there, so
+   each flooded cell gets its own goo. */
+.tile .goo {
+  position: absolute;
+  inset: 3%;
+  border-radius: 30%;
+  background: radial-gradient(circle at 35% 30%, rgba(214, 255, 190, 0.85), rgba(70, 199, 168, 0.75) 60%, rgba(30, 140, 120, 0.8));
+  box-shadow: inset 0 -4px 8px rgba(20, 90, 80, 0.35), 0 0 8px rgba(70, 199, 168, 0.5);
+  pointer-events: none;
+}
