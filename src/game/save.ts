@@ -41,6 +41,8 @@ export interface SaveData {
 }
 
 const KEY = "sweet-care-save-v1";
+/** Highest campaign level id. Gifts and stars exist for every level up to it (custom levels use 90). */
+const LAST_LEVEL = 30;
 
 export function defaultSave(): SaveData {
   return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [], prefs: defaultPrefs(), wallet: defaultWallet() };
@@ -76,7 +78,7 @@ export function loadSave(): SaveData {
       },
       gifts: Array.isArray(parsed.gifts) ? parsed.gifts.filter((id) => typeof id === "string") : [],
       openedGifts: Array.isArray(parsed.openedGifts)
-        ? parsed.openedGifts.filter((id) => typeof id === "number" && id >= 1 && id <= 15)
+        ? parsed.openedGifts.filter((id) => typeof id === "number" && id >= 1 && id <= LAST_LEVEL)
         : [],
       seeds: numberMap(parsed.seeds),
       attemptShifts: shiftMap(parsed.attemptShifts),
