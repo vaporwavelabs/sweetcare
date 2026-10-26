@@ -48,6 +48,7 @@ import {
   journeyFor,
   levelCells,
   levelMask,
+  makeContagion,
   makeJelly,
   sceneFor,
   starsFor,
@@ -90,6 +91,8 @@ import { bossTierFor, createBoss, hitBoss, MOVE_LABEL, shoveBoss as shoveKaren, 
 import { makeGerm, stepGerm, woundGerm, type Germ } from "@/game/swarm";
 import { applyStamp, auditTargets, createEmergency, damageScale, drainFlood, EMERGENCY_TIP, floodCells, floodLevel, shock, SPILL_AT, SPILL_BITE, stepEmergency, type EmergencyEvent, type EmergencyState } from "@/game/emergency";
 import { generateWard } from "@/game/generator";
+import { CONTAGION_POINTS, FEVER_POINTS, afterMove, cleanContagion, countFevers, countLayer, treatFevers } from "@/game/mechanics";
+import { evolveWardAhead, formOffset, isRolledWard, lockedWard, pushForm, wardForAttempt } from "@/game/wardEvolution";
 import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, resetProgress, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
 import { dayKey, shiftForDate } from "@/game/shifts";
 import { applyMotionPref, motionReduced, type Prefs } from "@/game/prefs";
@@ -110,6 +113,7 @@ interface VTile {
   dying: boolean;
   born: boolean;
   wrap: number;
+  fuse: number;
 }
 
 interface FloatText {
@@ -194,6 +198,12 @@ interface Model {
   germLeft: number;
   germKills: number;
   heal: number;
+  /** Infected cells. Spreads after a move that cleans none. See mechanics.ts. */
+  contagion: boolean[][];
+  contagionTotal: number;
+  cleanedThisMove: number;
+  movesMade: number;
+  feversTreated: number;
 }
 
 type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "rewards" | "cast" | "dev" | "creator";
@@ -232,6 +242,17 @@ function frames(count: number) {
   });
 }
 
+/** One line that explains a ward's new mechanics as the board opens. */
+function mechanicTip(level: LevelDef, board: Board): string | null {
+  if (level.bossHp || level.encounter) return null;
+  const infected = level.grid?.some((row) => row.includes("x"));
+  const fever = Boolean(level.fever) || board.some((row) => row.some((tile) => tile?.fuse));
+  if (infected && fever) return "Clean the contagion and treat fevers before they hit 0";
+  if (infected) return "Contagion spreads unless you clean some each move";
+  if (fever) return level.fever ? `Fevers break out every ${level.fever.every} moves. Clear them before they hit 0` : "Clear fever tiles before their count hits 0";
+  return null;
+}
+
 function readView(board: Board, dying: Set<number>, born: Set<number>, lift?: Map<number, number>): VTile[] {
   const view: VTile[] = [];
   for (let r = 0; r < board.length; r++) {
@@ -247,6 +268,7 @@ function readView(board: Board, dying: Set<number>, born: Set<number>, lift?: Ma
         dying: dying.has(tile.id),
         born: born.has(tile.id),
         wrap: tile.wrap ?? 0,
+        fuse: tile.fuse ?? 0,
       });
     }
   }
@@ -619,9 +641,10 @@ export function SweetCare() {
       setSave(attempt.save);
     }
     const scripted = custom ?? getLevel(id);
+    // Rolled wards may have been evolved ahead of time on the map. The attempt locks whichever is ready.
     const level = custom || scripted.bossHp || scripted.encounter || id >= 16
       ? scripted
-      : generateWard(id, attempt.seed, attempt.shiftId);
+      : wardForAttempt(id, attempt.seed, attempt.shiftId);
     const rng = mulberry32((attempt.seed ^ (id * 9973)) >>> 0);
     const mask = levelMask(level);
     const board = createBoard(rng, level.rows, level.cols, level.kinds, mask);
@@ -682,7 +705,13 @@ export function SweetCare() {
       germLeft: level.swarm?.count ?? 0,
       germKills: 0,
       heal: 0,
+      contagion: makeContagion(level),
+      contagionTotal: 0,
+      cleanedThisMove: 0,
+      movesMade: 0,
+      feversTreated: 0,
     };
+    model.contagionTotal = countLayer(model.contagion);
     if (level.swarm) {
       const first = makeGerm(++seq.current, 0, level.swarm, false);
       const second = makeGerm(++seq.current, 1, level.swarm, false);
@@ -699,6 +728,14 @@ export function SweetCare() {
     });
     void deal(run);
     window.setTimeout(() => assistOpen(run, "The ward did not finish opening."), 7000);
+    const tip = mechanicTip(level, board);
+    if (tip) window.setTimeout(() => {
+      const current = modelRef.current;
+      if (current && runRef.current === run && !current.outcome) {
+        say(current, tip, 2600);
+        bump();
+      }
+    }, 1500);
     } catch (error) {
       note("Start", error);
       setScreen("home");
@@ -959,7 +996,12 @@ export function SweetCare() {
     const model = modelRef.current;
     if (!model || runRef.current !== run || model.outcome) return;
     const jellyBroken = breakJelly(model.jelly, plan.removals);
-    const gained = plan.score + jellyBroken * 40;
+    const cleaned = cleanContagion(model.contagion, plan.removals);
+    const treated = treatFevers(model.board, plan);
+    model.cleanedThisMove += cleaned;
+    model.feversTreated += treated;
+    if (treated > 0) haptic("power");
+    const gained = plan.score + jellyBroken * 40 + cleaned * CONTAGION_POINTS + treated * FEVER_POINTS;
     for (const kind of KINDS) model.collected[kind] += plan.collected[kind];
     const feeds = plan.feeds.map((feed) => ({ ...feed }));
     if (feeds.length > 0) feeds[0]!.points += jellyBroken * 40;
@@ -1155,6 +1197,14 @@ export function SweetCare() {
     await wait(reducedMotion() ? 40 : 320);
   }
 
+  /** Evolves a rolled ward in the background so it is ready when the player gets there. */
+  function evolveNext(id: number) {
+    const current = saveRef.current;
+    if (id < 3 || id > 15 || getLevel(id).bossHp) return;
+    const attempt = attemptFor(current, id);
+    void evolveWardAhead(id, attempt.seed, attempt.shiftId, formOffset(current.form));
+  }
+
   function closeRound(model: Model, won: boolean, elapsed: number) {
     if (model.level.custom) {
       model.rankedUp = false;
@@ -1163,6 +1213,7 @@ export function SweetCare() {
     }
     const prev = saveRef.current;
     const key = String(model.level.id);
+    const formEntry = isRolledWard(model.level) ? { id: model.level.id, won, spare: won ? Math.max(0, model.moves) / Math.max(1, model.level.moves) : 0 } : null;
     const destroyed = KINDS.reduce((sum, kind) => sum + model.collected[kind], 0);
     const already = (prev.stars[key] ?? 0) > 0;
     const cleared = Object.values(prev.stars).filter((n) => n > 0).length + (won && !already ? 1 : 0);
@@ -1198,8 +1249,10 @@ export function SweetCare() {
     patchSave((current) => {
       const base = won ? releaseAttempt(recordWin(current, model.level.id, model.stars, model.score, elapsed), model.level.id) : current;
       const wallet = won ? payWin(current.wallet, payout, today) : { ...current.wallet, coins: current.wallet.coins + payout.total, earned: current.wallet.earned + payout.total };
-      return { ...base, career: applied.career, wallet };
+      return { ...base, career: applied.career, wallet, form: formEntry ? pushForm(current.form, formEntry) : current.form };
     }, won ? "checkpoint" : "session");
+    // Start shaping the next ward while the result card is up.
+    window.setTimeout(() => evolveNext(won ? model.level.id + 1 : model.level.id), 600);
     if (!won) patchSave((current) => current, "settings");
   }
 
@@ -1293,10 +1346,34 @@ export function SweetCare() {
     bump();
   }
 
+  /** Contagion and fevers get their turn once a move has fully resolved. Same order as the bot. */
+  function wardTurn(model: Model) {
+    if (model.outcome || model.level.bossHp || model.level.encounter) return;
+    model.movesMade += 1;
+    const turn = afterMove(model, model.mask, model.rng, model.level.fever);
+    if (turn.burst.length) {
+      particleRef.current?.spill(turn.burst, "red");
+      loseRound(model, "A fever spiked!");
+      return;
+    }
+    if (turn.spread) {
+      model.contagionTotal = Math.max(model.contagionTotal, countLayer(model.contagion));
+      say(model, "The contagion spread", 900);
+    }
+    if (turn.outbreak) {
+      say(model, "New fever!", 900);
+      sfxBossWarn();
+    }
+    if (turn.spread || turn.outbreak || countFevers(model.board) > 0) {
+      model.view = readView(model.board, new Set(), new Set());
+      bump();
+    }
+  }
+
   async function finish(run: number) {
     const model = modelRef.current;
     if (!model || runRef.current !== run || model.outcome) return;
-    const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly), wrapsLeft: countWraps(model.board) };
+    const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly), wrapsLeft: countWraps(model.board), contagionLeft: countLayer(model.contagion), feversTreated: model.feversTreated };
     const healed = model.level.encounter === "heal" && model.heal >= (model.level.healNeed ?? 1);
     // A leak costs life, not the ward: the wave is cleared once every germ has been dealt with.
     const cleared = model.level.encounter === "microbe" && model.germLeft <= 0 && model.germs.length === 0;
@@ -1474,6 +1551,7 @@ export function SweetCare() {
     if (runRef.current === run && modelRef.current) {
       trackAssist(modelRef.current, modelRef.current.level.id, steps >= 2);
       riseFlood(modelRef.current);
+      wardTurn(modelRef.current);
     }
   }
 
@@ -1899,9 +1977,21 @@ function DevMenu({
 
 function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack: () => void; onPick: (id: number) => void; onCollect: (levelId: number) => void }) {
   const nextId = continueLevel(save);
-  const next = save.seeds[String(nextId)]
-    ? generateWard(nextId, save.seeds[String(nextId)]!, save.attemptShifts[String(nextId)] ?? shiftForDate().id)
-    : getLevel(nextId);
+  const preview = attemptFor(save, nextId);
+  const rolled = nextId >= 3 && nextId <= 15 && !getLevel(nextId).bossHp;
+  const [evolvedNext, setEvolvedNext] = useState<LevelDef | null>(() => (rolled ? lockedWard(nextId, preview.seed, preview.shiftId) : null));
+  const next = evolvedNext ?? (save.seeds[String(nextId)] ? generateWard(nextId, preview.seed, preview.shiftId) : getLevel(nextId));
+  useEffect(() => {
+    if (!rolled) return;
+    let live = true;
+    // Evolve the next ward while the player looks at the map. A started attempt keeps what it got.
+    void evolveWardAhead(nextId, preview.seed, preview.shiftId, formOffset(save.form)).then((level) => {
+      if (live && level) setEvolvedNext(level);
+    });
+    return () => {
+      live = false;
+    };
+  }, [nextId, preview.seed, preview.shiftId, rolled, save.form]);
   const spot = MAP_SPOTS.find((item) => item.id === nextId) ?? MAP_SPOTS[0]!;
   const [zoomed, setZoomed] = useState(true);
   const [opening, setOpening] = useState<number | null>(null);
@@ -1953,7 +2043,7 @@ function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack
           })}
           <img className="traveler" src={portrait(save.career)} alt="" style={{ left: `${spot.x}%`, top: `${spot.y}%` }} />
         </IslandCamera>
-        <p className="map-caption">{(save.stars["5"] ?? 0) > 0 ? "Pick your next ward" : zoomed ? `Next · ${next.name}` : "Pick a ward"}</p>
+        <p className="map-caption">{(save.stars["5"] ?? 0) > 0 ? `Pick your next ward${next.evolved ? ` · ${nextId} evolved${next.evolved.note ? `, ${next.evolved.note}` : ""}` : ""}` : zoomed ? `Next · ${next.name}${next.evolved ? ` · evolved${next.evolved.note ? `, ${next.evolved.note}` : ""}` : ""}` : "Pick a ward"}</p>
       </div>
       {pendingGifts.length > 0 ? (
         <div className="map-gift-dock">
@@ -2168,7 +2258,7 @@ function Play({
   onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void;
 }) {
-  const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly), wrapsLeft: countWraps(model.board) };
+  const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly), wrapsLeft: countWraps(model.board), contagionLeft: countLayer(model.contagion), feversTreated: model.feversTreated };
   const boss = model.boss;
   const bossMax = boss?.max ?? 0;
   const microbes = model.level.encounter === "microbe";
@@ -2183,7 +2273,7 @@ function Play({
       ? Math.min(1, model.heal / healNeed)
       : microbes
         ? Math.min(1, model.germKills / germQuota)
-        : goalFraction(model.level, progress, model.jellyTotal, model.wrapsTotal);
+        : goalFraction(model.level, progress, model.jellyTotal, model.wrapsTotal, model.contagionTotal);
   const chips = arena ? [] : goalChips(model.level, progress, model.jellyTotal, model.wrapsTotal);
   const best = save.best[String(model.level.id)] ?? 0;
   const hintKeys = new Set((model.hint ?? []).map((pos) => keyOf(pos)));
@@ -2205,16 +2295,22 @@ function Play({
               const selected = model.selected?.r === tile.r && model.selected?.c === tile.c;
               const roll = model.rolls.find((item) => item.id === tile.id);
               return (
-                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", tile.wrap ? `wrapped wrap-${tile.wrap}` : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", model.locks.has(tile.id) ? "taped" : "", model.marked.includes(tile.id) ? "marked" : "", model.audited.includes(tile.id) ? "audited" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
+                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", tile.wrap ? `wrapped wrap-${tile.wrap}` : "", tile.fuse ? `fever${tile.fuse <= 3 ? " fever-hot" : ""}` : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", model.locks.has(tile.id) ? "taped" : "", model.marked.includes(tile.id) ? "marked" : "", model.audited.includes(tile.id) ? "audited" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
                   {arena && model.jelly[tile.r]?.[tile.c] ? <span className="goo" aria-hidden /> : null}
                   <img className="candy" src={spriteFor(tile)} alt="" draggable={false} />
                   {tile.special === "row" || tile.special === "col" ? <span className="shine" /> : null}
                   {tile.special === "bomb" ? <span className="ring" /> : null}
                   {tile.wrap ? <span className="wrap-band" aria-hidden /> : null}
+                  {tile.fuse && !tile.dying ? <span className="fever-badge" aria-label={`Fever, ${tile.fuse} moves left`}>{tile.fuse}</span> : null}
                 </div>
               );
             })}
           </div>
+          {countLayer(model.contagion) > 0 ? (
+            <div className="contagion-layer" aria-hidden>
+              {model.contagion.flatMap((row, r) => row.map((on, c) => (on ? <span key={`${r}-${c}`} className="contagion-cell" style={{ width: cell, height: cell, transform: `translate(${c * cell}px, ${r * cell}px)` }} /> : null)))}
+            </div>
+          ) : null}
           {model.floats.map((item) => (
             <span key={item.id} className="floater" style={{ left: `${((item.c + 0.5) / cols) * 100}%`, top: `${((item.r + 0.5) / rows) * 100}%` }}>{item.text}</span>
           ))}
@@ -2256,7 +2352,7 @@ function Play({
           <ul className="goal-chips" aria-label="Goals">
             {chips.map((chip) => (
               <li key={chip.key} className={chip.done ? "done" : ""}>
-                {chip.kind ? <img src={`/sprites/${chip.kind}.png`} alt={chip.kind} /> : <i className={chip.jelly ? "chip-jelly" : chip.wrap ? "chip-wrap" : "chip-score"} aria-label={chip.jelly ? "Jelly" : chip.wrap ? "Wraps" : "Score"} />}
+                {chip.kind ? <img src={`/sprites/${chip.kind}.png`} alt={chip.kind} /> : <i className={chip.mark ? `chip-${chip.mark}` : chip.jelly ? "chip-jelly" : chip.wrap ? "chip-wrap" : "chip-score"} aria-label={chip.mark === "contagion" ? "Contagion" : chip.mark === "fever" ? "Fevers" : chip.jelly ? "Jelly" : chip.wrap ? "Wraps" : "Score"} />}
                 <span>{chip.label}</span>
               </li>
             ))}

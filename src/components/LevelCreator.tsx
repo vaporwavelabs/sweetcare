@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, Copy, FlipHorizontal2, Play, Plus, Trash2 } from "lucide-react";
+import { ChevronLeft, Copy, Dna, FlipHorizontal2, Play, Plus, Trash2, Undo2 } from "lucide-react";
 import { KINDS, type Kind, type Power } from "@/game/engine";
 import { LEVELS, countJelly, makeJelly, type Goal, type LevelDef } from "@/game/levels";
-import { MAX_SIDE, MIN_SIDE, formatGrid, mirrorGrid, parseGrid, plainCell, resizeGrid, type CellSpec } from "@/game/layout";
+import { DEFAULT_FUSE, MAX_FUSE, MAX_SIDE, MIN_FUSE, MIN_SIDE, formatGrid, holeCell, mirrorGrid, parseGrid, plainCell, resizeGrid, type CellSpec } from "@/game/layout";
+import { MECHANICS, MECHANIC_LABEL, evolveAsync, mechanicsOf, type Candidate, type EvolveProgress, type Mechanic } from "@/game/evolve";
 import { SHAPES } from "@/game/shapes";
 import { canSimulate, simulateAsync, tune, type Report } from "@/game/simulate";
 import {
@@ -21,12 +22,14 @@ import {
   type CustomLevel,
 } from "@/game/customLevels";
 
-type Tool = "plain" | "hole" | "jelly" | "wrap1" | "wrap2" | "row" | "col" | "bomb" | "rainbow";
+type Tool = "plain" | "hole" | "jelly" | "contagion" | "fever" | "wrap1" | "wrap2" | "row" | "col" | "bomb" | "rainbow";
 
 const TOOLS: { id: Tool; label: string; hint: string }[] = [
   { id: "plain", label: "Tile", hint: "Plain cell. Clears everything on it." },
   { id: "hole", label: "Hole", hint: "No tile. Pieces fall through." },
   { id: "jelly", label: "Jelly", hint: "Match on it to clear the jelly." },
+  { id: "contagion", label: "Germs", hint: "Contagion. Match on it to clean it. It spreads after any move that cleans none." },
+  { id: "fever", label: "Fever", hint: "Fever tile. Its count drops every move. Clear it before it hits 0 or the ward is lost." },
   { id: "wrap1", label: "Wrap", hint: "Bandage wrap. Can't be swapped. One match peels it." },
   { id: "wrap2", label: "Wrap ×2", hint: "Two wraps. Needs two matches." },
   { id: "row", label: "Row", hint: "Starts as a row stripe." },
@@ -36,6 +39,12 @@ const TOOLS: { id: Tool; label: string; hint: string }[] = [
 ];
 
 const SPECIAL_GLYPH: Record<Power, string> = { row: "↔", col: "↕", bomb: "✹", rainbow: "★" };
+
+const GENERATIONS = [
+  { label: "Quick", n: 4 },
+  { label: "Standard", n: 8 },
+  { label: "Deep", n: 14 },
+];
 
 const TARGETS = [
   { label: "Gentle", rate: 0.9 },
@@ -47,14 +56,19 @@ const TARGETS = [
 /** Campaign levels that work as a starting point: goal levels, not bosses or encounters. */
 const REMIXABLE = LEVELS.filter((level) => !level.bossHp && !level.encounter && level.goals.length > 0);
 
-function paint(cell: CellSpec, tool: Tool, on: boolean): CellSpec {
+function paint(cell: CellSpec, tool: Tool, on: boolean, fuse: number): CellSpec {
   if (tool === "plain") return plainCell();
-  if (tool === "hole") return on ? { hole: true, jelly: false, wrap: 0, special: null } : plainCell();
+  if (tool === "hole") return on ? holeCell() : plainCell();
   const next = cell.hole ? plainCell() : { ...cell };
   if (tool === "jelly") next.jelly = on;
-  else if (tool === "wrap1") next.wrap = on ? 1 : 0;
+  else if (tool === "contagion") next.contagion = on;
+  else if (tool === "fever") {
+    next.fuse = on ? fuse : 0;
+    if (on) next.wrap = 0;
+  } else if (tool === "wrap1") next.wrap = on ? 1 : 0;
   else if (tool === "wrap2") next.wrap = on ? 2 : 0;
   else next.special = on ? tool : null;
+  if (next.wrap) next.fuse = 0;
   return next;
 }
 
@@ -63,6 +77,8 @@ function strokeAdds(cell: CellSpec, tool: Tool): boolean {
   if (tool === "plain") return true;
   if (tool === "hole") return !cell.hole;
   if (tool === "jelly") return !cell.jelly;
+  if (tool === "contagion") return !cell.contagion;
+  if (tool === "fever") return !cell.fuse;
   if (tool === "wrap1") return cell.wrap !== 1;
   if (tool === "wrap2") return cell.wrap !== 2;
   return cell.special !== tool;
@@ -95,6 +111,15 @@ export function LevelCreator({ onBack, onPlay, initialUid }: { onBack: () => voi
   const stroke = useRef<{ on: boolean; last: string } | null>(null);
   const boardRef = useRef<HTMLDivElement | null>(null);
   const testRun = useRef(0);
+  const [fuse, setFuse] = useState(DEFAULT_FUSE);
+  const [allow, setAllow] = useState<Mechanic[]>(["holes", "jelly", "wraps", "contagion", "fever"]);
+  const [keepGoals, setKeepGoals] = useState(false);
+  const [keepKinds, setKeepKinds] = useState(true);
+  const [depth, setDepth] = useState(1);
+  const [evolving, setEvolving] = useState<EvolveProgress | null>(null);
+  const [picks, setPicks] = useState<{ uid: string; list: Candidate[]; from: number; to: number } | null>(null);
+  const [undo, setUndo] = useState<CustomLevel | null>(null);
+  const evolveRun = useRef<{ cancelled: boolean } | null>(null);
 
   useEffect(() => {
     const stored = loadCustomLevels();
@@ -144,7 +169,7 @@ export function LevelCreator({ onBack, onPlay, initialUid }: { onBack: () => voi
 
   function applyAt(r: number, c: number, on: boolean) {
     const next = cells.map((row) => row.map((cell) => ({ ...cell })));
-    next[r]![c] = paint(next[r]![c]!, tool, on);
+    next[r]![c] = paint(next[r]![c]!, tool, on, fuse);
     setCells(next);
   }
 
@@ -190,6 +215,84 @@ export function LevelCreator({ onBack, onPlay, initialUid }: { onBack: () => voi
     }, 30);
   }
 
+  function startEvolve() {
+    if (!level || errors.length || evolving) return;
+    const chosen = TARGETS[target]!;
+    const token = { cancelled: false };
+    evolveRun.current = token;
+    const generations = GENERATIONS[depth]!.n;
+    const have = mechanicsOf(toLevelDef(level));
+    setPicks(null);
+    setEvolving({ generation: 0, generations, evaluated: 0, total: 8 * (generations + 1), best: 0 });
+    void evolveAsync(
+      toLevelDef(level),
+      {
+        target: chosen.rate,
+        seed: Math.floor(Math.random() * 1e6),
+        population: 8,
+        generations,
+        runs: 8,
+        allow,
+        complexity: Math.max(2, Math.min(4, allow.length - 1)),
+        lockGoals: keepGoals,
+        lockKinds: keepKinds,
+        kindPool: KINDS,
+        introduce: allow.filter((mechanic) => !have.includes(mechanic)).slice(0, 2),
+        moveBand: [14, 40],
+      },
+      (progress) => {
+        if (evolveRun.current === token) setEvolving(progress);
+      },
+      token,
+    ).then((result) => {
+      if (evolveRun.current !== token) return;
+      evolveRun.current = null;
+      setEvolving(null);
+      if (!result) return;
+      setPicks({ uid: level.uid, list: result.top, from: result.start.fitness.score, to: result.best.fitness.score });
+      say(result.best.fitness.score > result.start.fitness.score + 0.01 ? "Evolved. Pick a variant to use." : "Your level already scored well. Here are close variants.");
+    }).catch(() => {
+      evolveRun.current = null;
+      setEvolving(null);
+      say("Evolve stopped on an error. Try again.");
+    });
+  }
+
+  function stopEvolve() {
+    if (evolveRun.current) evolveRun.current.cancelled = true;
+    evolveRun.current = null;
+    setEvolving(null);
+  }
+
+  function patchFrom(pick: Candidate): Partial<CustomLevel> {
+    const made = pick.level;
+    return { kinds: [...new Set(made.kinds)], goals: made.goals, grid: made.grid, moves: made.moves, star2: made.star2, star3: made.star3, startSpecial: made.startSpecial ?? null, fever: made.fever ?? null };
+  }
+
+  function applyPick(pick: Candidate) {
+    if (!level) return;
+    setUndo(level);
+    update(patchFrom(pick));
+    setPicks(null);
+    say("Variant applied. You can undo it.");
+  }
+
+  function savePick(pick: Candidate) {
+    if (!level) return;
+    addLevel(cleanLevel({ ...level, ...patchFrom(pick), uid: undefined, name: `${level.name} evolved`.slice(0, 28), updatedAt: Date.now() }));
+    setPicks(null);
+    say("Saved as a new level.");
+  }
+
+  function undoPick() {
+    if (!undo) return;
+    const back = undo;
+    commit(levels.map((item) => (item.uid === back.uid ? back : item)));
+    setUid(back.uid);
+    setUndo(null);
+    setReport(null);
+  }
+
   async function copyCode() {
     try {
       await navigator.clipboard.writeText(code);
@@ -226,7 +329,7 @@ export function LevelCreator({ onBack, onPlay, initialUid }: { onBack: () => voi
       <div className="scroll">
         <div className="lc-levels" role="tablist" aria-label="Your levels">
           {levels.map((item) => (
-            <button key={item.uid} type="button" role="tab" aria-selected={item.uid === level.uid} className={item.uid === level.uid ? "on" : ""} onClick={() => { setUid(item.uid); setReport(null); }}>
+            <button key={item.uid} type="button" role="tab" aria-selected={item.uid === level.uid} className={item.uid === level.uid ? "on" : ""} onClick={() => { setUid(item.uid); setReport(null); setPicks(null); setUndo(null); }}>
               {item.name}
             </button>
           ))}
@@ -255,6 +358,7 @@ export function LevelCreator({ onBack, onPlay, initialUid }: { onBack: () => voi
             ))}
           </div>
           <p className="lc-hint">{TOOLS.find((item) => item.id === tool)?.hint} Drag to paint.</p>
+          {tool === "fever" ? <Stepper label="Fever count" value={fuse} min={MIN_FUSE} max={MAX_FUSE} onChange={setFuse} /> : null}
           <div
             ref={boardRef}
             className="lc-board"
@@ -282,10 +386,11 @@ export function LevelCreator({ onBack, onPlay, initialUid }: { onBack: () => voi
           >
             {cells.map((row, r) =>
               row.map((cell, c) => (
-                <div key={`${r}-${c}`} role="gridcell" aria-label={describe(cell, r, c)} className={["lc-cell", cell.hole ? "hole" : "", cell.jelly ? "jelly" : "", cell.wrap ? `wrap wrap-${cell.wrap}` : ""].filter(Boolean).join(" ")}>
+                <div key={`${r}-${c}`} role="gridcell" aria-label={describe(cell, r, c)} className={["lc-cell", cell.hole ? "hole" : "", cell.jelly ? "jelly" : "", cell.contagion ? "contagion" : "", cell.wrap ? `wrap wrap-${cell.wrap}` : ""].filter(Boolean).join(" ")}>
                   {!cell.hole ? <img src={`/sprites/${level.kinds[(r * 2 + c * 3 + ((r * c) % 3)) % level.kinds.length]}.png`} alt="" draggable={false} /> : null}
                   {cell.special ? <b className="lc-special">{SPECIAL_GLYPH[cell.special]}</b> : null}
                   {cell.wrap === 2 ? <em className="lc-wrapcount">2</em> : null}
+                  {cell.fuse ? <span className="fever-badge">{cell.fuse}</span> : null}
                 </div>
               )),
             )}
@@ -360,6 +465,19 @@ export function LevelCreator({ onBack, onPlay, initialUid }: { onBack: () => voi
               </select>
             </label>
           </div>
+          <div className="lc-row">
+            <label className="lc-field">
+              <span>Fever outbreaks</span>
+              <select value={level.fever?.every ?? 0} onChange={(event) => {
+                const every = Number(event.target.value);
+                update({ fever: every ? { every, fuse: level.fever?.fuse ?? DEFAULT_FUSE } : null });
+              }}>
+                <option value={0}>Off</option>
+                {[3, 4, 5, 6, 8, 10].map((n) => <option key={n} value={n}>Every {n} moves</option>)}
+              </select>
+            </label>
+            {level.fever ? <Stepper label="New fever count" value={level.fever.fuse} min={MIN_FUSE} max={MAX_FUSE} onChange={(n) => update({ fever: { every: level.fever!.every, fuse: n } })} /> : null}
+          </div>
         </section>
 
         <section className="lc-card">
@@ -396,6 +514,72 @@ export function LevelCreator({ onBack, onPlay, initialUid }: { onBack: () => voi
         </section>
 
         <section className="lc-card">
+          <h3>Evolve</h3>
+          <p className="lc-hint">Breeds variants of this level and has the bot play every one. It keeps the ones that land on the "Aim for" difficulty above, finish close to the move limit, and depend less on luck. It can add any mechanic you allow.</p>
+          <div className="lc-mechs" role="group" aria-label="Mechanics evolve may add">
+            {MECHANICS.map((mechanic) => {
+              const on = allow.includes(mechanic);
+              return (
+                <button key={mechanic} type="button" aria-pressed={on} className={on ? "on" : ""} onClick={() => setAllow(on ? allow.filter((item) => item !== mechanic) : [...allow, mechanic])}>
+                  {MECHANIC_LABEL[mechanic]}
+                </button>
+              );
+            })}
+          </div>
+          <div>
+            <label className="lc-check"><input type="checkbox" checked={keepGoals} onChange={(event) => setKeepGoals(event.target.checked)} />Keep my goals</label>
+            <label className="lc-check"><input type="checkbox" checked={keepKinds} onChange={(event) => setKeepKinds(event.target.checked)} />Keep my supplies</label>
+          </div>
+          <div className="lc-row tune">
+            <label className="lc-field">
+              <span>Search</span>
+              <select value={depth} onChange={(event) => setDepth(Number(event.target.value))}>
+                {GENERATIONS.map((item, i) => <option key={item.label} value={i}>{item.label} · {item.n} generations</option>)}
+              </select>
+            </label>
+            {evolving ? (
+              <button type="button" className="lc-chip danger" onClick={stopEvolve}>Stop</button>
+            ) : (
+              <button type="button" className="btn" disabled={testing !== null || errors.length > 0} onClick={startEvolve}><Dna aria-hidden /> Evolve</button>
+            )}
+          </div>
+          {evolving ? (
+            <div aria-live="polite">
+              <div className="lc-progress"><i style={{ width: `${Math.round((evolving.evaluated / Math.max(1, evolving.total)) * 100)}%` }} /></div>
+              <p className="lc-hint">Generation {evolving.generation}/{evolving.generations} · {evolving.evaluated} variants played · best fitness {Math.round(evolving.best * 100)}</p>
+            </div>
+          ) : null}
+          {undo && undo.uid === level.uid ? (
+            <div className="lc-actions"><button type="button" className="lc-chip" onClick={undoPick}><Undo2 aria-hidden />Undo evolve</button></div>
+          ) : null}
+          {picks && picks.uid === level.uid ? (
+            <div className="lc-evolved">
+              <p className="lc-hint">Fitness {Math.round(picks.from * 100)} → {Math.round(picks.to * 100)}</p>
+              {picks.list.map((pick, i) => (
+                <div key={i} className={`lc-pick${i === 0 ? " best" : ""}`}>
+                  <MiniBoard level={pick.level} />
+                  <div>
+                    <h4>{i === 0 ? "Best variant" : `Variant ${i + 1}`} · fitness {Math.round(pick.fitness.score * 100)}</h4>
+                    <div className="lc-stats">
+                      <span>{Math.round(pick.fitness.winRate * 100)}% bot wins</span>
+                      <span>{pick.level.moves} moves</span>
+                      <span>{Math.round(pick.fitness.tension * 100)}% close finishes</span>
+                    </div>
+                    {pick.changes.length ? (
+                      <ul className="lc-changes">{pick.changes.slice(0, 5).map((text) => <li key={text}>{text}</li>)}</ul>
+                    ) : <p className="lc-hint">Same board, retuned.</p>}
+                    <div className="lc-actions">
+                      <button type="button" className="lc-chip" onClick={() => applyPick(pick)}>Use</button>
+                      <button type="button" className="lc-chip" onClick={() => savePick(pick)}>Save as new</button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </section>
+
+        <section className="lc-card">
           <h3>Share</h3>
           <div className="lc-share">
             <input readOnly value={code} aria-label="Share code" onFocus={(event) => event.currentTarget.select()} />
@@ -427,9 +611,20 @@ export function LevelCreator({ onBack, onPlay, initialUid }: { onBack: () => voi
   );
 }
 
+function MiniBoard({ level }: { level: LevelDef }) {
+  const cells = parseGrid(level.grid, level.rows, level.cols);
+  return (
+    <div className="lc-mini" style={{ gridTemplateColumns: `repeat(${level.cols}, 1fr)` }} aria-hidden>
+      {cells.flatMap((row, r) => row.map((cell, c) => (
+        <i key={`${r}-${c}`} className={cell.hole ? "hole" : cell.fuse ? "fever" : cell.wrap ? "wrap" : cell.contagion ? "contagion" : cell.jelly ? "jelly" : cell.special ? "power" : ""} />
+      )))}
+    </div>
+  );
+}
+
 function describe(cell: CellSpec, r: number, c: number) {
   if (cell.hole) return `Row ${r + 1}, column ${c + 1}: hole`;
-  const parts = [cell.jelly ? "jelly" : "", cell.wrap ? `${cell.wrap} wrap` : "", cell.special ?? ""].filter(Boolean);
+  const parts = [cell.jelly ? "jelly" : "", cell.contagion ? "contagion" : "", cell.wrap ? `${cell.wrap} wrap` : "", cell.fuse ? `fever ${cell.fuse}` : "", cell.special ?? ""].filter(Boolean);
   return `Row ${r + 1}, column ${c + 1}: ${parts.length ? parts.join(", ") : "tile"}`;
 }
 
@@ -480,11 +675,14 @@ function GoalRow({ goal, kinds, onChange, onRemove }: { goal: Goal; kinds: Kind[
         const type = event.target.value as Goal["type"];
         if (type === "collect") onChange({ type, kind: kinds[0]!, count: 20 });
         else if (type === "score") onChange({ type, target: 8000 });
+        else if (type === "fevers") onChange({ type, count: 4 });
         else onChange({ type });
       }}>
         <option value="collect">Collect</option>
         <option value="jelly">Clear all jelly</option>
         <option value="wraps">Unwrap everything</option>
+        <option value="contagion">Disinfect everything</option>
+        <option value="fevers">Treat fevers</option>
         <option value="score">Reach a score</option>
       </select>
       {goal.type === "collect" ? (
@@ -495,6 +693,9 @@ function GoalRow({ goal, kinds, onChange, onRemove }: { goal: Goal; kinds: Kind[
           </select>
           <img src={`/sprites/${goal.kind}.png`} alt="" />
         </>
+      ) : null}
+      {goal.type === "fevers" ? (
+        <NumberField min={1} max={60} value={goal.count} label="Fevers to treat" onCommit={(count) => onChange({ ...goal, count })} />
       ) : null}
       {goal.type === "score" ? (
         <NumberField min={500} step={500} value={goal.target} label="Target score" onCommit={(target) => onChange({ ...goal, target })} />
