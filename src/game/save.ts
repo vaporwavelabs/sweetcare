@@ -1,6 +1,8 @@
 import { defaultCareer, type Career } from "./profile.ts";
 import { previewSeed } from "./generator.ts";
 import { dayKey, shiftForDate, type ShiftId } from "./shifts.ts";
+import { defaultPrefs, readPrefs, type Prefs } from "./prefs.ts";
+import { defaultWallet, readWallet, type Wallet } from "./rewards.ts";
 
 export interface DecorPin {
   id: string;
@@ -34,12 +36,14 @@ export interface SaveData {
   clears: Record<string, number>;
   loot: boolean;
   decor: DecorPin[];
+  prefs: Prefs;
+  wallet: Wallet;
 }
 
 const KEY = "sweet-care-save-v1";
 
 export function defaultSave(): SaveData {
-  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [] };
+  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [], prefs: defaultPrefs(), wallet: defaultWallet() };
 }
 
 export function rememberOpened(opened: number[] | undefined, levelId: number): number[] {
@@ -79,6 +83,8 @@ export function loadSave(): SaveData {
       clears: numberMap(parsed.clears),
       loot: parsed.loot === true || (parsed.stars?.["5"] ?? 0) > 0,
       decor: readDecor(parsed.decor),
+      prefs: readPrefs(parsed.prefs),
+      wallet: readWallet(parsed.wallet),
     };
   } catch {
     return defaultSave();
@@ -88,6 +94,19 @@ export function loadSave(): SaveData {
 export function writeSave(save: SaveData) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(KEY, JSON.stringify(save));
+}
+
+/** Wipe progress and rewards. Audio, haptics and the nurse's look stay. */
+export function resetProgress(save: SaveData): SaveData {
+  const fresh = defaultSave();
+  return {
+    ...fresh,
+    sound: save.sound,
+    music: save.music,
+    haptics: save.haptics,
+    prefs: save.prefs,
+    career: { ...fresh.career, name: save.career.name, look: save.career.look },
+  };
 }
 
 function numberMap(value: unknown): Record<string, number> {
