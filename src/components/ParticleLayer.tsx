@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
 import { ParticleWorld, type ParticleKind } from "@/game/particles";
-import { KINDS, type Kind } from "@/game/engine";
+import { FxWorld, lifeT, type Fx } from "@/game/fx";
+import { KINDS, type Kind, type Power } from "@/game/engine";
 
 export type ParticleHandle = {
   burst: (cells: { r: number; c: number; kind: Kind }[]) => void;
@@ -10,7 +11,19 @@ export type ParticleHandle = {
   bossFly: (cells: { r: number; c: number; kind: Kind }[], damage: number, onHit: (damage: number) => void) => void;
   spill: (cells: { r: number; c: number }[], tint?: "urine" | "lab" | "water" | "glass" | "red", shards?: boolean) => void;
   stars: () => void;
+  /** Sparks and a soft ring on every cleared cell. Brighter as the cascade deepens. */
+  pop: (cells: { r: number; c: number; kind: Kind }[], combo: number) => void;
+  /** Beams, shock rings and rays for power pieces that went off. */
+  detonate: (items: { r: number; c: number; special: Power }[]) => void;
+  /** A hit landing on the boss or lead germ, with a floating number. Zero shows the word "Guard". */
+  impact: (amount: number, tone: "hit" | "crit" | "guard" | "heal") => void;
+  /** Big moments on the boss: a phase change, a broken windup. */
+  bossBurst: (kind: "phase" | "interrupt" | "down") => void;
+  /** Paperwork flying from the boss onto the cells she tapes down. */
+  paper: (cells: { r: number; c: number }[]) => void;
 };
+
+const RAINBOW = ["#ff4d6d", "#ffb703", "#ffe56a", "#3dff78", "#3ec6ff", "#7a5cff", "#ff7ab8"];
 
 const GLOW: Record<Kind, string> = {
   heart: "#ff4d6d",
@@ -88,6 +101,7 @@ export function ParticleLayer({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
     const world = new ParticleWorld();
+    const fx = new FxWorld();
     const seekers: {
       x: number;
       y: number;
@@ -134,6 +148,14 @@ export function ParticleLayer({
         x: rect.left - hostRect.left + ((c + 0.5) / cols) * rect.width,
         y: rect.top - hostRect.top + ((r + 0.5) / rows) * rect.height,
       };
+    };
+
+    const boardBox = () => {
+      const board = boardRef.current;
+      const hostRect = host.getBoundingClientRect();
+      if (!board) return { x: 0, y: 0, w: hostRect.width, h: hostRect.height };
+      const rect = board.getBoundingClientRect();
+      return { x: rect.left - hostRect.left, y: rect.top - hostRect.top, w: rect.width, h: rect.height };
     };
 
     const scorePoint = () => {
@@ -337,6 +359,106 @@ export function ParticleLayer({
       ctx.restore();
     };
 
+    const drawFx = (item: Fx) => {
+      if (item.delay > 0) return;
+      const t = lifeT(item);
+      ctx.save();
+      if (item.kind === "spark") {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = 1 - t;
+        ctx.strokeStyle = item.color;
+        ctx.lineCap = "round";
+        ctx.lineWidth = item.size * (1 - t * 0.6);
+        ctx.beginPath();
+        ctx.moveTo(item.x, item.y);
+        ctx.lineTo(item.x - item.vx * 0.035, item.y - item.vy * 0.035);
+        ctx.stroke();
+      } else if (item.kind === "ember") {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = (1 - t) * (0.6 + 0.4 * Math.sin(item.age * 30));
+        ctx.fillStyle = item.color;
+        ctx.beginPath();
+        ctx.arc(item.x, item.y, item.size, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (item.kind === "ring") {
+        const ease = 1 - (1 - t) * (1 - t);
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = (1 - t) * 0.9;
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = Math.max(0.5, 7 * (1 - t));
+        ctx.shadowColor = item.color;
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(item.x, item.y, 4 + item.size * ease, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (item.kind === "beam") {
+        const span = item.span ?? 100;
+        const grow = Math.min(1, t * 5);
+        const thick = item.size * (t < 0.2 ? 0.4 + grow * 0.6 : 1 - (t - 0.2) * 1.1);
+        ctx.globalCompositeOperation = "lighter";
+        ctx.translate(item.x, item.y);
+        if (item.dir === "v") ctx.rotate(Math.PI / 2);
+        const len = span * (0.25 + grow * 0.75);
+        const band = ctx.createLinearGradient(0, -thick, 0, thick);
+        band.addColorStop(0, "rgba(255,255,255,0)");
+        band.addColorStop(0.35, item.color);
+        band.addColorStop(0.5, "#ffffff");
+        band.addColorStop(0.65, item.color);
+        band.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.globalAlpha = Math.max(0, 1 - t);
+        ctx.fillStyle = band;
+        ctx.fillRect(-len / 2, -Math.max(0.5, thick), len, Math.max(1, thick * 2));
+      } else if (item.kind === "ray") {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.translate(item.x, item.y);
+        ctx.rotate(item.angle);
+        const len = item.size * (0.4 + t * 0.9);
+        const ray = ctx.createLinearGradient(0, 0, len, 0);
+        ray.addColorStop(0, "#ffffff");
+        ray.addColorStop(0.3, item.color);
+        ray.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.globalAlpha = (1 - t) * 0.85;
+        ctx.fillStyle = ray;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(len, -len * 0.07);
+        ctx.lineTo(len, len * 0.07);
+        ctx.closePath();
+        ctx.fill();
+      } else if (item.kind === "paper") {
+        ctx.translate(item.x, item.y);
+        ctx.rotate(item.angle);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = item.color;
+        ctx.strokeStyle = "#c9b8a6";
+        ctx.lineWidth = 1;
+        ctx.shadowColor = "rgba(60, 20, 40, 0.35)";
+        ctx.shadowBlur = 6;
+        ctx.fillRect(-item.size, -item.size * 1.25, item.size * 2, item.size * 2.5);
+        ctx.shadowBlur = 0;
+        ctx.strokeRect(-item.size, -item.size * 1.25, item.size * 2, item.size * 2.5);
+        ctx.fillStyle = "#e0405f";
+        ctx.fillRect(-item.size * 0.7, -item.size * 0.8, item.size * 1.4, 2);
+        ctx.fillStyle = "#9aa3b5";
+        for (let line = 0; line < 3; line++) ctx.fillRect(-item.size * 0.7, -item.size * 0.2 + line * 4, item.size * 1.4, 1.2);
+      } else if (item.kind === "text") {
+        const pop = t < 0.15 ? 0.6 + (t / 0.15) * 0.55 : t < 0.3 ? 1.15 - ((t - 0.15) / 0.15) * 0.15 : 1;
+        ctx.globalAlpha = t > 0.7 ? Math.max(0, 1 - (t - 0.7) / 0.3) : 1;
+        ctx.translate(item.x, item.y);
+        ctx.scale(pop, pop);
+        ctx.font = `800 ${item.size}px "Fredoka", "Baloo 2", system-ui, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = Math.max(3, item.size * 0.22);
+        ctx.strokeStyle = "rgba(70, 0, 30, 0.85)";
+        ctx.strokeText(item.text ?? "", 0, 0);
+        ctx.fillStyle = item.color;
+        ctx.fillText(item.text ?? "", 0, 0);
+      }
+      ctx.restore();
+    };
+
     const draw = () => {
       const rect = fit();
       const dpr = canvas.width / Math.max(1, rect.width);
@@ -424,6 +546,8 @@ export function ParticleLayer({
         ctx.fill();
         ctx.restore();
       }
+      for (const item of fx.list) if (item.kind !== "text") drawFx(item);
+      for (const item of fx.list) if (item.kind === "text") drawFx(item);
     };
 
     const loop = (now: number) => {
@@ -431,6 +555,7 @@ export function ParticleLayer({
       const dt = Math.min(0.05, (now - last) / 1000 || 0.016);
       last = now;
       world.step(dt);
+      fx.step(dt);
       const goal = scorePoint();
       for (let i = seekers.length - 1; i >= 0; i--) {
         const spark = seekers[i]!;
@@ -575,7 +700,7 @@ export function ParticleLayer({
         }
       }
       draw();
-      if (world.bodies.length === 0 && seekers.length === 0 && drops.length === 0) {
+      if (world.bodies.length === 0 && seekers.length === 0 && drops.length === 0 && fx.list.length === 0) {
         raf = 0;
         return;
       }
@@ -766,6 +891,95 @@ export function ParticleLayer({
             trail: [],
           });
         }
+        kick();
+      },
+      pop(cells, combo) {
+        if (reduced || cells.length === 0) return;
+        fit();
+        const heat = Math.min(4, Math.max(1, combo));
+        const box = boardBox();
+        const cellW = box.w / Math.max(1, cols);
+        cells.slice(0, 14).forEach((cell, index) => {
+          const origin = pointFor(cell.r, cell.c);
+          const color = GLOW[cell.kind];
+          fx.ring(origin.x, origin.y, color, cellW * (0.55 + heat * 0.08), 0.36, index * 0.012);
+          fx.sparks(origin.x, origin.y, color, 4 + heat * 2, 220 + heat * 60, index);
+        });
+        if (combo >= 4) {
+          const mid = cells[Math.floor(cells.length / 2)]!;
+          const origin = pointFor(mid.r, mid.c);
+          fx.embers(origin.x, origin.y, "#ffe56a", 8 + combo * 2, cellW * 1.5);
+        }
+        kick();
+      },
+      detonate(items) {
+        if (reduced || items.length === 0) return;
+        fit();
+        const box = boardBox();
+        const cellW = box.w / Math.max(1, cols);
+        const cellH = box.h / Math.max(1, rows);
+        for (const item of items.slice(0, 8)) {
+          const origin = pointFor(item.r, item.c);
+          if (item.special === "row") {
+            fx.beam(box.x + box.w / 2, origin.y, "h", box.w * 1.08, cellH * 0.42, "#ffd35a");
+            fx.sparks(origin.x, origin.y, "#ffe56a", 10, 420);
+          } else if (item.special === "col") {
+            fx.beam(origin.x, box.y + box.h / 2, "v", box.h * 1.08, cellW * 0.42, "#7fd8ff");
+            fx.sparks(origin.x, origin.y, "#bfefff", 10, 420);
+          } else if (item.special === "bomb") {
+            fx.ring(origin.x, origin.y, "#ffb703", cellW * 2.4, 0.5);
+            fx.ring(origin.x, origin.y, "#fff1a8", cellW * 1.4, 0.42, 0.06);
+            fx.sparks(origin.x, origin.y, "#ff8a3d", 18, 520);
+            fx.embers(origin.x, origin.y, "#ffb703", 12, cellW * 2);
+          } else {
+            fx.rays(origin.x, origin.y, "#ffffff", 12, Math.max(box.w, box.h) * 0.7);
+            RAINBOW.forEach((color, index) => fx.ring(origin.x, origin.y, color, cellW * (1.2 + index * 0.45), 0.6, index * 0.04));
+          }
+        }
+        kick();
+      },
+      impact(amount, tone) {
+        if (reduced) return;
+        fit();
+        const at = bossPoint();
+        const color = tone === "crit" ? "#ffe56a" : tone === "heal" ? "#7dffb3" : tone === "guard" ? "#cfd8ff" : "#ffffff";
+        if (tone !== "heal") {
+          fx.ring(at.x, at.y, tone === "crit" ? "#ffb703" : "#ff7ab8", tone === "crit" ? 54 : 34, 0.36);
+          fx.sparks(at.x, at.y, tone === "crit" ? "#ffe56a" : "#ff9cc8", tone === "crit" ? 14 : 7, tone === "crit" ? 480 : 320);
+        } else fx.embers(at.x, at.y, "#7dffb3", 14, 26);
+        if (tone === "guard") fx.text(at.x, at.y - 26, "Guard", color, 22);
+        else fx.tally(at.x, at.y - 26, amount, tone === "heal" ? "+" : "-", color, tone === "crit" ? 30 : 22);
+        kick();
+      },
+      bossBurst(kind) {
+        if (reduced) return;
+        fit();
+        const at = bossPoint();
+        if (kind === "phase") {
+          fx.rays(at.x, at.y, "#ff3b6b", 16, 220);
+          fx.ring(at.x, at.y, "#ff3b6b", 140, 0.7);
+          fx.ring(at.x, at.y, "#ffe56a", 90, 0.6, 0.1);
+          fx.embers(at.x, at.y, "#ff6b8a", 22, 60);
+        } else if (kind === "interrupt") {
+          fx.ring(at.x, at.y, "#7fd8ff", 80, 0.5);
+          fx.sparks(at.x, at.y, "#bfefff", 18, 520);
+          fx.text(at.x, at.y - 54, "Interrupted!", "#bfefff", 24);
+        } else {
+          fx.rays(at.x, at.y, "#ffe56a", 20, 260);
+          RAINBOW.forEach((color, index) => fx.ring(at.x, at.y, color, 60 + index * 26, 0.8, index * 0.05));
+          fx.sparks(at.x, at.y, "#ffe56a", 28, 620);
+        }
+        kick();
+      },
+      paper(cells) {
+        if (reduced || cells.length === 0) return;
+        fit();
+        const from = bossPoint();
+        cells.forEach((cell, index) => {
+          const to = pointFor(cell.r, cell.c);
+          fx.paper(from.x, from.y, to.x, to.y, index * 0.08);
+          fx.ring(to.x, to.y, "#ff3b6b", 26, 0.4, 0.55 + index * 0.08);
+        });
         kick();
       },
     };
