@@ -24,10 +24,11 @@ test("tutorial wards stay scripted", () => {
   assert.equal(ward.startSpecial, null);
 });
 
-test("boss wards keep their order", () => {
-  assert.equal(generateWard(5, 3, "fully-staffed").name, "Code Blue");
-  assert.equal(generateWard(10, 3, "fully-staffed").name, "The Overflow");
-  assert.equal(generateWard(15, 3, "fully-staffed").boss, "Audit");
+test("boss wards stay scripted and keep their emergencies in order", () => {
+  assert.equal(generateWard(5, 3, "fully-staffed").boss, "Code Blue");
+  assert.equal(generateWard(10, 3, "fully-staffed").emergency, "overflow");
+  assert.equal(generateWard(15, 3, "night-shift").boss, "Audit");
+  assert.equal(generateWard(15, 3, "night-shift").bossHp, 220);
 });
 
 test("short staffed cuts the clock", () => {

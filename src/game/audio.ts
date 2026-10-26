@@ -7,6 +7,8 @@ let step = 0;
 let soundOn = true;
 let musicOn = true;
 let started = false;
+let sfxLevel = 0.8;
+let musicLevel = 0.5;
 
 const MELODY = [523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 392];
 
@@ -71,11 +73,18 @@ export function setAudioPrefs(sound: boolean, music: boolean) {
   applyPrefs();
 }
 
+/** Volumes run 0 to 100, as the settings sliders show them. */
+export function setVolumes(sfx: number, music: number) {
+  sfxLevel = Math.max(0, Math.min(1, sfx / 100));
+  musicLevel = Math.max(0, Math.min(1, music / 100));
+  applyPrefs();
+}
+
 function applyPrefs() {
   if (!ctx || !sfxBus || !musicBus) return;
   const now = ctx.currentTime;
-  sfxBus.gain.setTargetAtTime(soundOn ? 0.9 : 0.0001, now, 0.03);
-  musicBus.gain.setTargetAtTime(musicOn ? 0.11 : 0.0001, now, 0.05);
+  sfxBus.gain.setTargetAtTime(soundOn ? Math.max(0.0001, 1.1 * sfxLevel) : 0.0001, now, 0.03);
+  musicBus.gain.setTargetAtTime(musicOn ? Math.max(0.0001, 0.22 * musicLevel) : 0.0001, now, 0.05);
 }
 
 function tone(
@@ -184,7 +193,7 @@ function playBite(item: Bite) {
     const src = audio.createBufferSource();
     const gain = audio.createGain();
     src.buffer = buffer;
-    gain.gain.value = item.boost;
+    gain.gain.value = item.boost * sfxLevel;
     src.connect(gain);
     gain.connect(master);
     liveBites.push(src);
@@ -261,6 +270,31 @@ export function sfxMatch(combo: number) {
 export function sfxBossHit() {
   tone(160, 0.07, "square", 0.05, 0, 70);
   tone(90, 0.09, "sine", 0.06);
+}
+
+/** Karen winding up. Two rising beeps, like a monitor alarm. */
+export function sfxBossWarn() {
+  tone(660, 0.09, "square", 0.04);
+  tone(880, 0.12, "square", 0.045, 0.13);
+}
+
+/** Karen's attack landing. */
+export function sfxBossStrike() {
+  tone(120, 0.18, "sawtooth", 0.06, 0, 55);
+  tone(70, 0.22, "sine", 0.09, 0.02);
+}
+
+/** A big hit broke her windup. */
+export function sfxInterrupt() {
+  tone(520, 0.08, "triangle", 0.08, 0, 1040);
+  tone(1320, 0.12, "sine", 0.05, 0.06, 1760);
+}
+
+/** She enters a new phase. A falling growl and a sting on top. */
+export function sfxBossPhase() {
+  tone(220, 0.45, "sawtooth", 0.05, 0, 82);
+  tone(330, 0.3, "square", 0.03, 0.05, 110);
+  tone(988, 0.16, "triangle", 0.05, 0.32);
 }
 
 /** Glass breaking, then a wet catch. */
@@ -403,4 +437,14 @@ export function sfxGift(levelId: number) {
 export function stopMusic() {
   if (musicTimer) clearInterval(musicTimer);
   musicTimer = null;
+}
+
+/** Coins dropping into the wallet. */
+export function sfxCoins() {
+  [1318, 1568, 1976].forEach((freq, i) => tone(freq, 0.09, "triangle", 0.06, i * 0.07));
+  tone(2637, 0.16, "sine", 0.03, 0.22);
+}
+
+/** A player bumping into a hazard. */
+export function hurtBuzz() {
 }

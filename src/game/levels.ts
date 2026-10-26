@@ -1,11 +1,14 @@
-import { type Kind, emptyCollected, type Pos } from "./engine.ts";
+import type { EmergencyKind } from "./emergency.ts";
+import { type Kind, emptyCollected, type Mask, type Pos } from "./engine.ts";
+import { hasHoles, maskOf, parseGrid, type CellSpec } from "./layout.ts";
 
 export type JellyPattern = "none" | "bottom" | "checker" | "frame" | "all" | "lower";
 
 export type Goal =
   | { type: "score"; target: number }
   | { type: "collect"; kind: Kind; count: number }
-  | { type: "jelly" };
+  | { type: "jelly" }
+  | { type: "wraps" };
 
 export interface LevelDef {
   id: number;
@@ -26,11 +29,19 @@ export interface LevelDef {
   startSpecial?: "row" | "col" | "bomb" | "rainbow" | null;
   /** Present on every 5th ward. Draining it wins the level. */
   bossHp?: number;
+  /** The ward emergency a boss fight runs during. See emergency.ts. */
+  emergency?: EmergencyKind;
   /** Microbes advance on the board. Healing is a calm organ stage. */
   encounter?: "microbe" | "heal";
   patient?: "brain" | "heart";
   swarm?: { count: number; hp: number; speed: number; bite: number };
   healNeed?: number;
+  /** Board layout, one string per row. See layout.ts for the tokens. */
+  grid?: string[];
+  /** Backdrop photo number. Defaults to the level id. */
+  scene?: number;
+  /** Built in the level creator. A custom run never touches the campaign save. */
+  custom?: boolean;
 }
 
 const HOSPITAL: Kind[] = ["heart", "cross", "pill", "bandage", "nurse", "kit"];
@@ -38,38 +49,104 @@ const CLINIC: Kind[] = ["heart", "cross", "kit", "teddy", "diaper", "bottle"];
 const PEDIATRIC: Kind[] = ["heart", "cross", "kit", "pacifier", "gift", "rattle"];
 const NEURO: Kind[] = ["scan", "ruby", "gilt", "glow", "plus", "gem", "iv", "slate"];
 const LAB: Kind[] = ["flask", "tubes", "scope", "biohaz", "eyewash", "cyl", "goggles", "extinguisher"];
-const ORTHO: Kind[] = ["boot", "xray", "ribs", "calcium", "badge", "screw", "wrap", "pelvis"];
 
 function longer(n: number) {
   return Math.ceil(n * 1.15);
 }
 
 export const LEVELS: LevelDef[] = [
-  { id: 1, name: "Sweet Start", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 4), moves: longer(22), goals: [{ type: "collect", kind: "heart", count: longer(12) }], star2: longer(1600), star3: longer(2800), jelly: "none" },
-  { id: 2, name: "Patch Job", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 4), moves: longer(22), goals: [{ type: "collect", kind: "bandage", count: longer(12) }], star2: longer(1600), star3: longer(2800), jelly: "none" },
+  { id: 1, name: "Sweet Start", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 4), moves: 18, goals: [{ type: "collect", kind: "heart", count: longer(12) }], star2: 7100, star3: 10200, jelly: "none" },
+  { id: 2, name: "Patch Job", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 4), moves: 18, goals: [{ type: "collect", kind: "bandage", count: longer(12) }], star2: 7650, star3: 10100, jelly: "none" },
   { id: 3, name: "Capsule Run", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 5), moves: longer(22), goals: [{ type: "collect", kind: "pill", count: longer(12) }], star2: longer(1700), star3: longer(3000), jelly: "none" },
   { id: 4, name: "Red Cross", rows: 6, cols: 6, kinds: HOSPITAL.slice(0, 5), moves: longer(22), goals: [{ type: "collect", kind: "cross", count: longer(12) }], star2: longer(1700), star3: longer(3000), jelly: "none" },
-  { id: 5, name: "Nurse Karen", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(20), goals: [{ type: "collect", kind: "heart", count: longer(10) }], star2: longer(1800), star3: longer(3200), jelly: "none", bossHp: 96 },
+  { id: 5, name: "Nurse Karen", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(20), goals: [{ type: "collect", kind: "heart", count: longer(10) }], star2: longer(1800), star3: longer(3200), jelly: "none", bossHp: 120, boss: "Code Blue", emergency: "code-blue" },
   { id: 6, name: "Teddy Trail", rows: 6, cols: 6, kinds: CLINIC, moves: longer(22), goals: [{ type: "collect", kind: "teddy", count: longer(10) }], star2: longer(1800), star3: longer(3200), jelly: "none" },
   { id: 7, name: "Diaper Duty", rows: 6, cols: 6, kinds: CLINIC.slice(0, 5), moves: longer(28), goals: [{ type: "jelly" }], star2: longer(1800), star3: longer(3200), jelly: "bottom" },
   { id: 8, name: "Bottle Check", rows: 6, cols: 6, kinds: CLINIC.slice(0, 5), moves: longer(32), goals: [{ type: "jelly" }], star2: longer(2000), star3: longer(3600), jelly: "checker" },
   { id: 9, name: "Score Sprint", rows: 6, cols: 6, kinds: CLINIC, moves: longer(20), goals: [{ type: "score", target: longer(3500) }], star2: longer(4500), star3: longer(6200), jelly: "none" },
-  { id: 10, name: "Karen Returns", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(26), goals: [{ type: "collect", kind: "heart", count: longer(12) }], star2: longer(2200), star3: longer(3800), jelly: "none", bossHp: 156 },
+  { id: 10, name: "Karen Returns", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(26), goals: [{ type: "collect", kind: "heart", count: longer(12) }], star2: longer(2200), star3: longer(3800), jelly: "none", bossHp: 180, boss: "The Overflow", emergency: "overflow" },
   { id: 11, name: "Picture Frame", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(32), goals: [{ type: "jelly" }], star2: longer(2000), star3: longer(3600), jelly: "frame" },
   { id: 12, name: "Pacifier Gifts", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(26), goals: [{ type: "collect", kind: "pacifier", count: longer(14) }, { type: "collect", kind: "gift", count: longer(14) }], star2: longer(2400), star3: longer(4000), jelly: "none" },
   { id: 13, name: "Sticky Ward", rows: 6, cols: 6, kinds: PEDIATRIC.slice(0, 5), moves: longer(36), goals: [{ type: "jelly" }], star2: longer(2400), star3: longer(4200), jelly: "all" },
   { id: 14, name: "Night Shift", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(22), goals: [{ type: "score", target: longer(5500) }], star2: longer(6800), star3: longer(8600), jelly: "none" },
-  { id: 15, name: "Head Nurse", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(36), goals: [{ type: "collect", kind: "cross", count: longer(12) }], star2: longer(3200), star3: longer(5200), jelly: "none", bossHp: 220 },
-  { id: 16, name: "Neuro Ward", rows: 6, cols: 6, kinds: NEURO, moves: longer(34), goals: [{ type: "collect", kind: "iv", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
-  { id: 17, name: "Lab Run", rows: 6, cols: 6, kinds: LAB, moves: longer(34), goals: [{ type: "collect", kind: "flask", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
-  { id: 18, name: "Ortho Bay", rows: 6, cols: 6, kinds: ORTHO, moves: longer(34), goals: [{ type: "collect", kind: "pelvis", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
-  { id: 19, name: "Peds", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(26), goals: [{ type: "collect", kind: "gift", count: longer(10) }], star2: longer(2000), star3: longer(3400), jelly: "none" },
-  { id: 20, name: "Radiology", rows: 6, cols: 6, kinds: ["scan", "slate", "glow", "xray", "gem", "plus"], moves: longer(28), goals: [{ type: "collect", kind: "scan", count: longer(8) }], star2: longer(2000), star3: longer(3400), jelly: "none" },
-  { id: 21, name: "Neurology", rows: 6, cols: 6, kinds: NEURO, moves: longer(30), goals: [{ type: "collect", kind: "iv", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
-  { id: 22, name: "Ortho", rows: 6, cols: 6, kinds: ORTHO, moves: longer(30), goals: [{ type: "collect", kind: "ribs", count: longer(8) }], star2: longer(2200), star3: longer(3600), jelly: "none" },
-  { id: 23, name: "Med Surg", rows: 6, cols: 6, kinds: HOSPITAL, moves: longer(28), goals: [{ type: "collect", kind: "kit", count: longer(10) }], star2: longer(2000), star3: longer(3400), jelly: "none" },
-  { id: 24, name: "ICU", rows: 6, cols: 6, kinds: ["heart", "cross", "pill", "kit", "iv", "nurse"], moves: longer(24), goals: [{ type: "collect", kind: "iv", count: longer(12) }], star2: longer(2400), star3: longer(4000), jelly: "none" },
-  { id: 25, name: "PCU", rows: 6, cols: 6, kinds: CLINIC, moves: longer(28), goals: [{ type: "collect", kind: "bottle", count: longer(10) }], star2: longer(2000), star3: longer(3400), jelly: "none" },
+  { id: 15, name: "Head Nurse", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(36), goals: [{ type: "collect", kind: "cross", count: longer(12) }], star2: longer(3200), star3: longer(5200), jelly: "none", bossHp: 220, boss: "Audit", emergency: "audit" },
+  // Side wards. Moves and stars come from scripts/levels/tune.ts: the bot wins about 80% of the
+  // first ward in each run of five and about 60% of the fifth.
+  { id: 16, name: "Neuro Ward", rows: 6, cols: 6, kinds: ["scan", "ruby", "glow", "plus", "gem", "iv"], moves: 35, goals: [{ type: "wraps" }, { type: "collect", kind: "iv", count: 14 }], star2: 8000, star3: 9000, jelly: "none", grid: [
+    "# . . . . #",
+    ". . w w . .",
+    ". w # # w .",
+    ". w # # w .",
+    ". . w w . .",
+    "# . . . . #",
+  ] },
+  { id: 17, name: "Lab Run", rows: 6, cols: 6, kinds: LAB.slice(0, 6), moves: 25, goals: [{ type: "jelly" }, { type: "collect", kind: "flask", count: 16 }], star2: 8400, star3: 9150, jelly: "none", grid: [
+    ". . . . . .",
+    ". # . . # .",
+    ". j j j j .",
+    ". j j j j .",
+    ". # j j # .",
+    ". . . . . .",
+  ] },
+  { id: 18, name: "Ortho Bay", rows: 6, cols: 6, kinds: ["boot", "xray", "ribs", "calcium", "screw", "pelvis"], moves: 30, goals: [{ type: "collect", kind: "pelvis", count: 24 }], star2: 10600, star3: 13200, jelly: "none", grid: [
+    ". . . . . .",
+    ". . . . . .",
+    "# # b . # #",
+    ". . . . . .",
+    ". . w w . .",
+    ". . . . . .",
+  ] },
+  { id: 19, name: "Peds", rows: 6, cols: 6, kinds: PEDIATRIC, moves: 29, goals: [{ type: "collect", kind: "gift", count: 26 }, { type: "wraps" }], star2: 11150, star3: 12650, jelly: "none", grid: [
+    "# . . . . #",
+    ". w . . w .",
+    ". . . . . .",
+    ". . . . . .",
+    ". w . . w .",
+    "# . . . . #",
+  ] },
+  { id: 20, name: "Radiology", rows: 7, cols: 6, kinds: ["scan", "slate", "glow", "xray", "gem", "plus"], moves: 30, goals: [{ type: "collect", kind: "scan", count: 22 }, { type: "jelly" }], star2: 10650, star3: 13050, jelly: "none", grid: [
+    ". . . . . .",
+    "# . . . . #",
+    "# # . . # #",
+    "# . . . . #",
+    ". . . . . .",
+    "j j j j j j",
+    "j j j j j j",
+  ] },
+  { id: 21, name: "Neurology", rows: 6, cols: 6, kinds: NEURO.slice(0, 6), moves: 28, goals: [{ type: "jelly" }], star2: 9400, star3: 11150, jelly: "none", grid: [
+    "# # j j # #",
+    "# j j j j #",
+    "j j j j j j",
+    "j j j j j j",
+    "# j j j j #",
+    "# # j j # #",
+  ] },
+  { id: 22, name: "Ortho", rows: 6, cols: 6, kinds: ["boot", "xray", "ribs", "calcium", "screw"], moves: 23, goals: [{ type: "collect", kind: "ribs", count: 16 }, { type: "collect", kind: "screw", count: 16 }, { type: "wraps" }], star2: 11050, star3: 16200, jelly: "none", grid: [
+    ". . . . . .",
+    ". . . . . .",
+    ". . W W . .",
+    ". . W W . .",
+    ". . . . . .",
+    ". . . . . .",
+  ] },
+  { id: 23, name: "Med Surg", rows: 7, cols: 7, kinds: ["heart", "cross", "pill", "bandage", "kit"], moves: 19, goals: [{ type: "jelly" }, { type: "collect", kind: "kit", count: 24 }], star2: 11350, star3: 15350, jelly: "none", grid: [
+    "# # . j . # #",
+    "# . . j . . #",
+    ". . . j . . .",
+    "j j j j j j j",
+    ". . . j . . .",
+    "# . . j . . #",
+    "# # . j . # #",
+  ] },
+  { id: 24, name: "ICU", rows: 6, cols: 6, kinds: ["heart", "cross", "pill", "kit", "iv", "nurse"], moves: 36, goals: [{ type: "wraps" }, { type: "collect", kind: "iv", count: 16 }], star2: 12450, star3: 16250, jelly: "none", grid: [
+    "w . . . . w",
+    ". W . . W .",
+    ". . . . . .",
+    ". . . . . .",
+    ". W . . W .",
+    "w . . . . w",
+  ] },
+  { id: 25, name: "PCU", rows: 6, cols: 6, kinds: ["heart", "cross", "kit", "teddy", "bottle"], moves: 20, goals: [{ type: "collect", kind: "bottle", count: 32 }, { type: "score", target: 14000 }], star2: 15200, star3: 17750, jelly: "none", startSpecial: "bomb" },
   { id: 26, name: "Spore Drift", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(24), goals: [], star2: longer(1400), star3: longer(2600), jelly: "none", encounter: "microbe", swarm: { count: 4, hp: 16, speed: 7, bite: 8 } },
   { id: 27, name: "Culture", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(26), goals: [], star2: longer(1800), star3: longer(3200), jelly: "none", encounter: "microbe", swarm: { count: 6, hp: 24, speed: 10, bite: 12 } },
   { id: 28, name: "Outbreak", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "kit"], moves: longer(28), goals: [], star2: longer(2200), star3: longer(3800), jelly: "none", encounter: "microbe", swarm: { count: 8, hp: 32, speed: 13, bite: 16 } },
@@ -129,7 +206,35 @@ export function getLevel(id: number): LevelDef {
   return LEVELS[id - 1] ?? LEVELS[0]!;
 }
 
+export function levelCells(level: LevelDef): CellSpec[][] | null {
+  return level.grid ? parseGrid(level.grid, level.rows, level.cols) : null;
+}
+
+export function levelMask(level: LevelDef): Mask | undefined {
+  const cells = levelCells(level);
+  return cells && hasHoles(cells) ? maskOf(cells) : undefined;
+}
+
+export function sceneFor(level: LevelDef): number {
+  const n = level.scene ?? level.id;
+  return n >= 1 && n <= 15 ? n : ((Math.abs(n) % 15) + 1);
+}
+
 export function makeJelly(level: LevelDef): boolean[][] {
+  const grid = patternJelly(level);
+  const cells = levelCells(level);
+  if (!cells) return grid;
+  for (let r = 0; r < level.rows; r++) {
+    for (let c = 0; c < level.cols; c++) {
+      const cell = cells[r]![c]!;
+      if (cell.hole) grid[r]![c] = false;
+      else if (cell.jelly) grid[r]![c] = true;
+    }
+  }
+  return grid;
+}
+
+function patternJelly(level: LevelDef): boolean[][] {
   const grid = Array.from({ length: level.rows }, () => Array<boolean>(level.cols).fill(false));
   if (level.jelly === "none") return grid;
   for (let r = 0; r < level.rows; r++) {
@@ -156,12 +261,14 @@ export interface Progress {
   score: number;
   collected: Record<Kind, number>;
   jellyLeft: number;
+  wrapsLeft?: number;
 }
 
 export function goalsMet(level: LevelDef, progress: Progress): boolean {
   return level.goals.every((goal) => {
     if (goal.type === "score") return progress.score >= goal.target;
     if (goal.type === "collect") return progress.collected[goal.kind] >= goal.count;
+    if (goal.type === "wraps") return (progress.wrapsLeft ?? 0) === 0;
     return progress.jellyLeft === 0;
   });
 }
@@ -173,11 +280,12 @@ export function starsFor(level: LevelDef, score: number, won: boolean): number {
   return 1;
 }
 
-export function goalFraction(level: LevelDef, progress: Progress, jellyTotal: number): number {
+export function goalFraction(level: LevelDef, progress: Progress, jellyTotal: number, wrapsTotal = 0): number {
   if (!level.goals.length) return 0;
   const parts = level.goals.map((goal) => {
     if (goal.type === "score") return Math.min(1, progress.score / goal.target);
     if (goal.type === "collect") return Math.min(1, progress.collected[goal.kind] / goal.count);
+    if (goal.type === "wraps") return wrapsTotal ? Math.min(1, (wrapsTotal - (progress.wrapsLeft ?? 0)) / wrapsTotal) : 1;
     if (!jellyTotal) return 1;
     return Math.min(1, (jellyTotal - progress.jellyLeft) / jellyTotal);
   });
@@ -189,10 +297,11 @@ export interface GoalChip {
   label: string;
   kind: Kind | null;
   jelly: boolean;
+  wrap?: boolean;
   done: boolean;
 }
 
-export function goalChips(level: LevelDef, progress: Progress, jellyTotal: number): GoalChip[] {
+export function goalChips(level: LevelDef, progress: Progress, jellyTotal: number, wrapsTotal = 0): GoalChip[] {
   return level.goals.map((goal, index) => {
     if (goal.type === "score") {
       return {
@@ -211,6 +320,17 @@ export function goalChips(level: LevelDef, progress: Progress, jellyTotal: numbe
         kind: goal.kind,
         jelly: false,
         done: have >= goal.count,
+      };
+    }
+    if (goal.type === "wraps") {
+      const left = progress.wrapsLeft ?? 0;
+      return {
+        key: `wraps-${index}`,
+        label: `${wrapsTotal - left}/${wrapsTotal}`,
+        kind: null,
+        jelly: false,
+        wrap: true,
+        done: left === 0,
       };
     }
     const cleared = jellyTotal - progress.jellyLeft;
