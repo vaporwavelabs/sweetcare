@@ -1,6 +1,6 @@
 import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { ChevronLeft, Coins, Gift, Star, Volume2, VolumeX } from "lucide-react";
+import { ChevronLeft, Coins, Gift, Pause, Star, Volume2, VolumeX } from "lucide-react";
 import { Cheer, CountUp, DocAvatar, portrait, ProfileScreen, SketchModel } from "@/components/Profile";
 import { applyRound, ACHIEVEMENTS, rankTitle } from "@/game/profile";
 import {
@@ -88,6 +88,7 @@ import { GIFT_CARDS, cardForLevel, rememberGift } from "@/game/cards";
 import { haptic, setHapticStrength, setHapticsPref } from "@/game/haptics";
 import { bossTierFor, createBoss, hitBoss, MOVE_LABEL, shoveBoss as shoveKaren, stepBoss, windupProgress, type BossEvent, type BossState } from "@/game/boss";
 import { makeGerm, stepGerm, woundGerm, type Germ } from "@/game/swarm";
+import { applyStamp, auditTargets, createEmergency, damageScale, drainFlood, EMERGENCY_TIP, floodCells, floodLevel, shock, SPILL_AT, SPILL_BITE, stepEmergency, type EmergencyEvent, type EmergencyState } from "@/game/emergency";
 import { generateWard } from "@/game/generator";
 import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, resetProgress, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
 import { dayKey, shiftForDate } from "@/game/shifts";
@@ -179,6 +180,13 @@ interface Model {
   locks: Map<number, number>;
   /** Tiles she is about to tape. Shown as a warning during the windup. */
   marked: number[];
+  /** The ward emergency this boss fight runs during. */
+  emergency: EmergencyState | null;
+  /** Power pieces the auditor's stamp is aimed at. */
+  audited: number[];
+  /** The pause sheet is open. Input, boss pressure and the clock all stop. */
+  paused: boolean;
+  pausedAt: number;
   /** Seconds left of the red hit flash on the stage. */
   sting: number;
   playerHp: number;
@@ -664,6 +672,10 @@ export function SweetCare() {
       boss: level.bossHp ? createBoss(level.bossHp, bossTierFor(level.id, level.bossHp), attempt.seed ^ level.id) : null,
       locks: new Map(),
       marked: [],
+      emergency: level.bossHp && level.emergency ? createEmergency(level.emergency) : null,
+      audited: [],
+      paused: false,
+      pausedAt: 0,
       sting: 0,
       playerHp: 100,
       germs: [],
@@ -702,6 +714,46 @@ export function SweetCare() {
     }
     startLevel(id);
   }
+
+  function pausePlay() {
+    const model = modelRef.current;
+    if (!model || model.paused || model.outcome || model.countdown) return;
+    model.paused = true;
+    model.pausedAt = Date.now();
+    clearHint();
+    sfxClick();
+    bump();
+  }
+
+  function resumePlay() {
+    const model = modelRef.current;
+    if (!model || !model.paused) return;
+    model.paused = false;
+    // Time spent on the pause sheet doesn't count toward the ward clock.
+    model.startedAt += Date.now() - model.pausedAt;
+    sfxClick();
+    scheduleHint();
+    bump();
+  }
+
+  useEffect(() => {
+    if (screen !== "play") return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" && event.key !== "p") return;
+      if (modelRef.current?.paused) resumePlay();
+      else pausePlay();
+    };
+    // A boss keeps walking in real time, so leaving the tab pauses the ward.
+    const onHide = () => {
+      if (document.visibilityState === "hidden") pausePlay();
+    };
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+  });
 
   function leavePlay() {
     const custom = modelRef.current?.level.custom;
@@ -953,19 +1005,30 @@ export function SweetCare() {
     particleRef.current?.pop(bits, plan.combo);
     if (detonated.length > 0) particleRef.current?.detonate(detonated);
     const bigHit = plan.combo >= 3 || detonated.length > 0 || plan.removals.length >= 5;
+    // The Overflow: every mopped jelly cell is a hit on Karen.
+    if (model.boss && model.emergency?.kind === "overflow" && jellyBroken > 0) woundBoss(model, jellyBroken * 2);
     if (model.boss && plan.removals.length >= 3) {
       const hits = plan.removals.flatMap((cell) => {
         const kind = model.board[cell.r]?.[cell.c]?.kind;
         return kind ? [{ r: cell.r, c: cell.c, kind }] : [];
       });
       sfxBossHit();
+      const scaleOf = (kind: Kind) => 4 * damageScale(model.emergency, kind);
+      const hearts = hits.filter((hit) => hit.kind === "heart").length;
+      if (shock(model.emergency, hearts)) {
+        say(model, "Clear! Shocked back");
+        particleRef.current?.bossBurst("interrupt");
+        sfxInterrupt();
+        haptic("power");
+        woundBoss(model, 10, true);
+      }
       if (hits.length === 0 || reducedMotion() || !particleRef.current) {
-        woundBoss(model, hits.length * 4, bigHit);
+        woundBoss(model, hits.reduce((sum, hit) => sum + scaleOf(hit.kind), 0), bigHit);
         shoveBoss(model, true);
       } else {
         sfxOrbFly();
         let landed = 0;
-        particleRef.current.bossFly(hits, 4, (damage) => {
+        particleRef.current.bossFly(hits, scaleOf, (damage) => {
           const current = modelRef.current;
           if (!current || current.outcome) return;
           landed += 1;
@@ -1142,7 +1205,7 @@ export function SweetCare() {
 
   onBossTick.current = (dt, paint) => {
     const model = modelRef.current;
-    if (!model || model.outcome || model.countdown) return;
+    if (!model || model.outcome || model.countdown || model.paused) return;
     model.sting = Math.max(0, model.sting - dt);
     if (model.locks.size > 0) {
       for (const [id, left] of model.locks) {
@@ -1177,8 +1240,58 @@ export function SweetCare() {
       applyBossEvent(model, event);
       if (model.outcome) return;
     }
+    if (model.emergency) {
+      for (const event of stepEmergency(model.emergency, dt, boss.phase)) {
+        applyEmergencyEvent(model, event);
+        if (model.outcome) return;
+      }
+    }
     if (paint) bump();
   };
+
+  function applyEmergencyEvent(model: Model, event: EmergencyEvent) {
+    if (event.type === "flatline") {
+      model.playerHp = Math.max(0, model.playerHp - event.bite);
+      model.sting = 0.5;
+      say(model, "Flatline! Get those hearts in");
+      sfxBad();
+      haptic("hurt");
+      if (model.playerHp <= 0) loseRound(model, "The patient flatlined");
+      return;
+    }
+    if (event.type === "audit-warn") {
+      model.audited = auditTargets(model.board, model.rng);
+      if (model.audited.length) {
+        say(model, "Audit incoming! Use your powers");
+        sfxBossWarn();
+      }
+      return;
+    }
+    const hit = applyStamp(model.board, model.audited);
+    model.audited = [];
+    if (!hit.length) return;
+    say(model, hit.length > 1 ? "Stamped flat!" : "Stamped!");
+    sfxBossStrike();
+    haptic("hurt");
+    particleRef.current?.paper(hit);
+    if (model.phase === "idle") model.view = readView(model.board, new Set(), new Set());
+  }
+
+  /** The Overflow: after each move the flood rises, and spills over you at half the board. */
+  function riseFlood(model: Model) {
+    if (model.emergency?.kind !== "overflow" || !model.boss || model.boss.hp <= 0 || model.outcome) return;
+    for (const cell of floodCells(model.jelly, model.mask, 2 + model.boss.phase, model.rng)) model.jelly[cell.r]![cell.c] = true;
+    if (floodLevel(model.jelly, model.mask) >= SPILL_AT) {
+      drainFlood(model.jelly, model.rng);
+      model.playerHp = Math.max(0, model.playerHp - SPILL_BITE);
+      model.sting = 0.5;
+      say(model, "It spilled over!");
+      sfxBad();
+      haptic("hurt");
+      if (model.playerHp <= 0) loseRound(model, "The ward flooded");
+    }
+    bump();
+  }
 
   async function finish(run: number) {
     const model = modelRef.current;
@@ -1358,12 +1471,15 @@ export function SweetCare() {
     model.rolls = [];
     bump();
     const steps = await runClears(run, planAfterSwap(model.board, a, b, 1), 1);
-    if (runRef.current === run && modelRef.current) trackAssist(modelRef.current, modelRef.current.level.id, steps >= 2);
+    if (runRef.current === run && modelRef.current) {
+      trackAssist(modelRef.current, modelRef.current.level.id, steps >= 2);
+      riseFlood(modelRef.current);
+    }
   }
 
   function handleTap(pos: Pos) {
     const model = modelRef.current;
-    if (!model || model.outcome) return;
+    if (!model || model.outcome || model.paused) return;
     unlockAudio();
     if (model.phase === "aim-blast") {
       if (model.boosters.blast <= 0) return;
@@ -1565,7 +1681,11 @@ export function SweetCare() {
           liquidRef={liquidRef}
           particleRef={particleRef}
           onBack={leavePlay}
+          onPause={pausePlay}
+          onResume={resumePlay}
           onSound={toggleSound}
+          onMusic={toggleMusic}
+          onHaptics={toggleHaptics}
           onProfile={openProfile}
           onAid={useAid}
           onCancel={cancelAim}
@@ -1578,7 +1698,7 @@ export function SweetCare() {
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             const current = modelRef.current;
-            if (!current || current.phase !== "idle" || current.outcome) return;
+            if (!current || current.phase !== "idle" || current.outcome || current.paused) return;
             unlockAudio();
             const pos = cellFromEvent(event);
             if (!pos) return;
@@ -1653,6 +1773,22 @@ function Cast({
           Start
         </button>
       </div>
+    </div>
+  );
+}
+
+function EmergencyMeter({ state, flood }: { state: EmergencyState; flood: number }) {
+  const label = state.kind === "code-blue" ? `Code Blue · ♥ ×${state.clock > 0 ? 2 : 1}` : state.kind === "overflow" ? "The Overflow" : "Audit";
+  const value = state.kind === "overflow" ? `${Math.round(flood * 100)}%` : `${Math.max(0, Math.ceil(state.clock))}s`;
+  const fill = state.kind === "overflow" ? Math.min(1, flood / SPILL_AT) : Math.max(0, state.clock / state.span);
+  const hot = state.kind === "overflow" ? fill > 0.75 : state.kind === "audit" ? state.warned : fill < 0.3;
+  return (
+    <div className={`emergency-meter ${state.kind}${hot ? " hot" : ""}`}>
+      <div className="meter-label"><span>{label}</span><span>{value}</span></div>
+      <div className="boss-bar" role="meter" aria-label={label} aria-valuenow={Math.round(fill * 100)} aria-valuemin={0} aria-valuemax={100}>
+        <span style={{ width: `${Math.round(fill * 100)}%` }} />
+      </div>
+      <p className="emergency-tip">{EMERGENCY_TIP[state.kind]}</p>
     </div>
   );
 }
@@ -2002,7 +2138,7 @@ function ComboCounter({ live, best }: { live: number; best: number }) {
 }
 
 function Play({
-  model, save, side, cell, slotRef, frame, boardRef, liquidRef, particleRef, onBack, onSound, onProfile, onAid, onCancel, onArm, onAdvance, onRetry, onNext, onHome, onCollect, onPointerDown, onPointerMove, onPointerUp,
+  model, save, side, cell, slotRef, frame, boardRef, liquidRef, particleRef, onBack, onPause, onResume, onSound, onMusic, onHaptics, onProfile, onAid, onCancel, onArm, onAdvance, onRetry, onNext, onHome, onCollect, onPointerDown, onPointerMove, onPointerUp,
 }: {
   model: Model;
   save: SaveData;
@@ -2014,7 +2150,11 @@ function Play({
   liquidRef: React.RefObject<LiquidHandle | null>;
   particleRef: React.RefObject<ParticleHandle | null>;
   onBack: () => void;
+  onPause: () => void;
+  onResume: () => void;
   onSound: () => void;
+  onMusic: () => void;
+  onHaptics: () => void;
   onProfile: () => void;
   onAid: () => void;
   onCancel: () => void;
@@ -2065,7 +2205,7 @@ function Play({
               const selected = model.selected?.r === tile.r && model.selected?.c === tile.c;
               const roll = model.rolls.find((item) => item.id === tile.id);
               return (
-                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", tile.wrap ? `wrapped wrap-${tile.wrap}` : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", model.locks.has(tile.id) ? "taped" : "", model.marked.includes(tile.id) ? "marked" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
+                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", tile.wrap ? `wrapped wrap-${tile.wrap}` : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", model.locks.has(tile.id) ? "taped" : "", model.marked.includes(tile.id) ? "marked" : "", model.audited.includes(tile.id) ? "audited" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
                   <img className="candy" src={spriteFor(tile)} alt="" draggable={false} />
                   {tile.special === "row" || tile.special === "col" ? <span className="shine" /> : null}
                   {tile.special === "bomb" ? <span className="ring" /> : null}
@@ -2090,7 +2230,11 @@ function Play({
     <div className={`column play${arena ? " boss-play" : ""}`}>
       <div className="crush-nav">
         <span className="nav-side">
-          <button className="icon-btn" type="button" onClick={onBack} aria-label="Back to map"><ChevronLeft /></button>
+          {model.outcome ? (
+            <button className="icon-btn" type="button" onClick={onBack} aria-label="Back to map"><ChevronLeft /></button>
+          ) : (
+            <button className="icon-btn" type="button" onClick={onPause} disabled={Boolean(model.countdown)} aria-label="Pause"><Pause /></button>
+          )}
           <button className="icon-btn" type="button" onClick={onSound} aria-label={save.sound ? "Mute sound" : "Sound on"}>{save.sound ? <Volume2 /> : <VolumeX />}</button>
         </span>
         <img className="header-title" src="/ui/crush-title.png" alt="Sweet Care Crush" />
@@ -2119,7 +2263,7 @@ function Play({
         ) : null}
         <div className="score-slab">
           <div className="hs-col">
-            <span className="kicker">High Score</span>
+            <span className="kicker">Score</span>
             <strong className="live-score" ref={scoreRef} key={model.score}>{model.score}</strong>
             <span className="capsule" aria-hidden><i className="seg red" /><i className="seg gold" /><i className="seg violet" /></span>
             <span className="sr-only">Score {model.score}. Best {best}.</span>
@@ -2150,6 +2294,7 @@ function Play({
               </div>
             </div>
           </div>
+          {model.emergency ? <EmergencyMeter state={model.emergency} flood={floodLevel(model.jelly, model.mask)} /> : null}
         </div>
       ) : null}
       {microbes ? (
@@ -2186,7 +2331,7 @@ function Play({
               ) : boss.hot > 0 ? <span className="hot-line">I'm hot!</span> : null}
               {boss.hot > 0 || boss.action?.move === "coffee" ? <span className="steam" /> : null}
               <span className="karen-fan">
-                <KarenWalk slow={boss.slow > 0 || boss.hot > 0} facing={boss.dir} paused={Boolean(model.outcome) || boss.hp <= 0 || Boolean(boss.action)} />
+                <KarenWalk slow={boss.slow > 0 || boss.hot > 0} facing={boss.dir} paused={Boolean(model.outcome) || model.paused || boss.hp <= 0 || Boolean(boss.action)} />
               </span>
             </span>
           </>
@@ -2251,6 +2396,9 @@ function Play({
         </button>
       </div>
       <ParticleLayer boardRef={boardRef} scoreRef={scoreRef} bossRef={bossRef} rows={rows} cols={cols} apiRef={particleRef} />
+      {model.paused && !model.outcome ? (
+        <PauseSheet save={save} level={model.level} onResume={onResume} onRestart={onRetry} onQuit={onBack} onSound={onSound} onMusic={onMusic} onHaptics={onHaptics} />
+      ) : null}
       {model.outcome ? (
         <Outro model={model} save={save} destroyed={KINDS.filter((kind) => model.collected[kind] > 0)} onAdvance={onAdvance} onRetry={onRetry} onNext={onNext} onBack={onBack} onProfile={onProfile} onHome={onHome} onCollect={onCollect} />
       ) : null}
@@ -2485,6 +2633,57 @@ function CardReveal({ levelId, onClose }: { levelId: number; onClose: () => void
     </div>
   );
 }
+function PauseSheet({ save, level, onResume, onRestart, onQuit, onSound, onMusic, onHaptics }: {
+  save: SaveData;
+  level: LevelDef;
+  onResume: () => void;
+  onRestart: () => void;
+  onQuit: () => void;
+  onSound: () => void;
+  onMusic: () => void;
+  onHaptics: () => void;
+}) {
+  const [confirm, setConfirm] = useState<"restart" | "quit" | null>(null);
+  const resumeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    resumeRef.current?.focus();
+  }, [confirm]);
+  const realTime = Boolean(level.bossHp || level.encounter === "microbe");
+  if (confirm) {
+    return (
+      <div className="pause-sheet">
+        <div className="modal" role="alertdialog" aria-label={confirm === "quit" ? "Quit this ward?" : "Restart this ward?"}>
+          <h2>{confirm === "quit" ? "Quit ward?" : "Restart?"}</h2>
+          <p>{confirm === "quit" ? (level.custom ? "You'll go back to the editor." : "This attempt won't count and your moves are lost.") : "You'll start this ward again from the first move."}</p>
+          <div className="pause-actions">
+            <button className="btn" type="button" ref={resumeRef} onClick={() => setConfirm(null)}>Keep playing</button>
+            <button className="btn secondary" type="button" onClick={confirm === "quit" ? onQuit : onRestart}>{confirm === "quit" ? "Quit" : "Restart"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="pause-sheet">
+      <div className="modal" role="dialog" aria-label="Paused">
+        <h2>Paused</h2>
+        <p>{level.custom ? "Your test level" : level.name}{realTime ? " · the ward is holding still" : ""}</p>
+        <div className="pause-actions">
+          <button className="btn" type="button" ref={resumeRef} onClick={onResume}>Resume</button>
+          <button className="btn secondary" type="button" onClick={() => setConfirm("restart")}>Restart</button>
+          <button className="btn secondary" type="button" onClick={() => setConfirm("quit")}>{level.custom ? "Back to editor" : "Quit to map"}</button>
+        </div>
+        <div className="pause-toggles" role="group" aria-label="Quick settings">
+          <button type="button" className={save.sound ? "on" : ""} aria-pressed={save.sound} onClick={onSound}>Sound</button>
+          <button type="button" className={save.music ? "on" : ""} aria-pressed={save.music} onClick={onMusic}>Music</button>
+          <button type="button" className={save.haptics ? "on" : ""} aria-pressed={save.haptics} onClick={onHaptics}>Vibration</button>
+        </div>
+        <p className="pause-key">Esc or P pauses and resumes.</p>
+      </div>
+    </div>
+  );
+}
+
 function Outro({
   model,
   save,

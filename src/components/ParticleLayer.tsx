@@ -8,7 +8,8 @@ export type ParticleHandle = {
   summon: (cells: { r: number; c: number }[], count?: number) => void;
   rain: () => void;
   scoreFly: (feeds: { r: number; c: number; kind: Kind; points: number }[], onArrive: (points: number) => void) => void;
-  bossFly: (cells: { r: number; c: number; kind: Kind }[], damage: number, onHit: (damage: number) => void) => void;
+  /** `damage` is per orb, or a function of the tile kind when some tiles hit harder. */
+  bossFly: (cells: { r: number; c: number; kind: Kind }[], damage: number | ((kind: Kind) => number), onHit: (damage: number) => void) => void;
   spill: (cells: { r: number; c: number }[], tint?: "urine" | "lab" | "water" | "glass" | "red", shards?: boolean) => void;
   stars: () => void;
   /** Sparks and a soft ring on every cleared cell. Brighter as the cascade deepens. */
@@ -790,10 +791,12 @@ export function ParticleLayer({
         kick();
       },
       bossFly(cells, damage, onHit) {
-        if (cells.length === 0 || damage <= 0) return;
+        const dmg = typeof damage === "number" ? () => damage : damage;
+        const total = (list: typeof cells) => list.reduce((sum, cell) => sum + dmg(cell.kind), 0);
+        if (cells.length === 0 || total(cells) <= 0) return;
         onBoss = onHit;
         if (reduced) {
-          onHit(damage * cells.length);
+          onHit(total(cells));
           return;
         }
         fit();
@@ -811,7 +814,7 @@ export function ParticleLayer({
             vx: (dx / dist) * 720,
             vy: (dy / dist) * 720 - 40,
             color: GLOW[cell.kind],
-            points: damage,
+            points: dmg(cell.kind),
             homing: true,
             boss: true,
             star: false,
@@ -822,8 +825,7 @@ export function ParticleLayer({
             trail: [],
           });
         }
-        const extra = cells.length - shown.length;
-        if (extra > 0) onHit(damage * extra);
+        if (cells.length > shown.length) onHit(total(cells.slice(shown.length)));
         kick();
       },
       spill(cells, tint = "urine", shards = false) {

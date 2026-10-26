@@ -39,13 +39,6 @@ function pick<T>(rng: () => number, list: readonly T[]): T {
   return list[Math.floor(rng() * list.length)]!;
 }
 
-function bossOf(id: number): string | null {
-  if (id === 5) return "Code Blue";
-  if (id === 10) return "The Overflow";
-  if (id === 15) return "Audit";
-  return null;
-}
-
 function jellyFor(rng: () => number): JellyPattern {
   return pick(rng, ["bottom", "checker", "frame", "lower", "all"] as const);
 }
@@ -62,7 +55,10 @@ function weighted(kinds: Kind[], scarce: Kind | null): Kind[] {
 
 const cache = new Map<string, LevelDef>();
 
-/** Tutorial wards stay scripted. Every later ward is rolled from the attempt seed, then tuned by the bot. */
+/**
+ * Tutorial and boss wards stay scripted (a boss ward's emergency lives on its LevelDef). Every
+ * other ward is rolled from the attempt seed, then tuned by the bot.
+ */
 export function generateWard(id: number, seed: number, shiftId: ShiftId = "fully-staffed"): LevelDef {
   const key = `${id}|${seed}|${shiftId}`;
   const hit = cache.get(key);
@@ -75,14 +71,13 @@ export function generateWard(id: number, seed: number, shiftId: ShiftId = "fully
 
 function rollWardDef(id: number, seed: number, shiftId: ShiftId): LevelDef {
   const base = LEVELS[id - 1] ?? LEVELS[0]!;
-  if (id <= 2) {
+  if (id <= 2 || base.bossHp) {
     const shift = shiftById(shiftId);
-    return { ...base, seed, shiftId: shift.id, shiftLabel: shift.label, boss: null, startSpecial: null };
+    return { ...base, seed, shiftId: shift.id, shiftLabel: shift.label, boss: base.boss ?? null, startSpecial: null };
   }
 
   const rng = rngOf(seed ^ (id * 997));
   const shift = shiftById(shiftId);
-  const boss = bossOf(id);
   let kinds = wingKinds(id).slice();
   if (shift.id === "float-pool") kinds = otherWing(id, seed % 7).slice();
   let kindCount = shift.id === "short-staffed" ? 4 : id < 6 ? 5 : id >= 11 && seed % 3 === 0 ? 6 : 5;
@@ -92,27 +87,14 @@ function rollWardDef(id: number, seed: number, shiftId: ShiftId): LevelDef {
   }
   kinds = kinds.slice(0, Math.min(kinds.length, kindCount));
 
-  const shape = boss ? SHAPES[0]! : pick(rng, shapesFor(id));
+  const shape = pick(rng, shapesFor(id));
   const cells = parseGrid(shape.grid, base.rows, base.cols);
   let goals: Goal[];
   let jelly: JellyPattern = "none";
-  let name = base.name;
+  const name = base.name;
   let wraps = 0;
 
-  if (boss === "Code Blue") {
-    name = "Code Blue";
-    goals = [{ type: "collect", kind: "heart", count: 30 + (seed % 5) }];
-  } else if (boss === "The Overflow") {
-    name = "The Overflow";
-    jelly = "lower";
-    goals = [
-      { type: "jelly" },
-      { type: "collect", kind: kinds.includes("kit") ? "kit" : kinds[0]!, count: 18 + (seed % 4) },
-    ];
-  } else if (boss === "Audit") {
-    name = "Audit";
-    goals = [{ type: "score", target: 16000 + (seed % 8) * 250 }];
-  } else if (shift.id === "night-shift") {
+  if (shift.id === "night-shift") {
     goals = [{ type: "score", target: 7000 + id * 700 + (seed % 6) * 200 }];
   } else if (shift.id === "spill-risk") {
     jelly = jellyFor(rng);
@@ -147,7 +129,7 @@ function rollWardDef(id: number, seed: number, shiftId: ShiftId): LevelDef {
     }
   }
 
-  if (!wraps && id >= 9 && !boss && rng() < 0.4) wraps = 2 + (seed % 3);
+  if (!wraps && id >= 9 && rng() < 0.4) wraps = 2 + (seed % 3);
   if (wraps) scatterWraps(cells, wraps, id >= 12 ? 0.35 : 0, rng);
 
   const scarce = shift.id === "supply-shortage" ? goalKind(goals) : null;
@@ -168,7 +150,7 @@ function rollWardDef(id: number, seed: number, shiftId: ShiftId): LevelDef {
     seed,
     shiftId: shift.id,
     shiftLabel: shift.label,
-    boss,
+    boss: null,
     startSpecial,
   };
   let target = targetRate(id);
