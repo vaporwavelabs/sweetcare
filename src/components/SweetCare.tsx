@@ -71,6 +71,7 @@ import {
   unlockAudio,
 } from "@/game/audio";
 import { GIFT_CARDS, cardForLevel, rememberGift } from "@/game/cards";
+import { haptic, hapticsSupported, setHapticsPref } from "@/game/haptics";
 import { generateWard } from "@/game/generator";
 import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
 import { shiftForDate } from "@/game/shifts";
@@ -306,6 +307,7 @@ export function SweetCare() {
     diskRef.current = loaded;
     setSave(loaded);
     setAudioPrefs(loaded.sound, loaded.music);
+    setHapticsPref(loaded.haptics);
   }, []);
 
   useEffect(() => {
@@ -379,6 +381,7 @@ export function SweetCare() {
           ...disk,
           sound: next.sound,
           music: next.music,
+          haptics: next.haptics,
           career: {
             ...disk.career,
             name: next.career.name,
@@ -428,6 +431,16 @@ export function SweetCare() {
     patchSave((prev) => {
       const next = { ...prev, music: !prev.music };
       setAudioPrefs(next.sound, next.music);
+      return next;
+    }, "settings");
+  }
+
+  function toggleHaptics() {
+    sfxClick();
+    patchSave((prev) => {
+      const next = { ...prev, haptics: !prev.haptics };
+      setHapticsPref(next.haptics);
+      if (next.haptics) haptic("special");
       return next;
     }, "settings");
   }
@@ -673,6 +686,7 @@ export function SweetCare() {
     const lead = model.germs.reduce((best, germ) => (germ.y > best.y ? germ : best));
     lead.hp -= amount;
     lead.y = Math.max(-18, lead.y - 4);
+    haptic("boss-hit");
     if (lead.hp <= 0) {
       model.germs = model.germs.filter((germ) => germ.id !== lead.id);
       model.germKills += 1;
@@ -691,7 +705,11 @@ export function SweetCare() {
     model.bossHp = Math.max(0, model.bossHp - amount);
     model.bossBump += 1;
     model.bossHot = 1.35;
-    if (model.bossHp === 0) model.banner = "Karen is down!";
+    haptic("boss-hit");
+    if (model.bossHp === 0) {
+      model.banner = "Karen is down!";
+      haptic("power");
+    }
     bump();
   }
 
@@ -823,6 +841,9 @@ export function SweetCare() {
     }
     if (bones >= 3) sfxCrack();
     const summoned = plan.spawns.filter((spawn) => spawn.special === "bomb" || spawn.special === "rainbow");
+    if (model.shake || summoned.length > 0) haptic("power");
+    else if (plan.spawns.length > 0) haptic("special");
+    else haptic("match", plan.combo);
     if (summoned.length > 0) summonImps(model, summoned, 8, plan.combo === 7);
     else if (plan.combo === 7) {
       /* the faaah sting already started for this clear */
@@ -920,6 +941,7 @@ export function SweetCare() {
         model.germs = model.germs.filter((item) => item.id !== germ.id);
         model.banner = "A microbe reached the ward";
         sfxBad();
+        haptic("hurt");
         if (model.playerHp <= 0) {
           model.elapsed = Math.max(0, Date.now() - model.startedAt);
           model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
@@ -928,6 +950,7 @@ export function SweetCare() {
           model.phase = "idle";
           model.banner = "The microbes got through";
           sfxLose();
+          haptic("lose");
           closeRound(model, false, model.elapsed);
           bump();
           return;
@@ -952,6 +975,7 @@ export function SweetCare() {
     model.bossNear = Math.min(100, model.bossNear + speed * dt);
     if (model.bossNear >= 98) {
       model.playerHp = Math.max(0, model.playerHp - 20 * dt);
+      haptic("hurt");
       if (model.playerHp <= 0) {
         model.elapsed = Math.max(0, Date.now() - model.startedAt);
         model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
@@ -960,6 +984,7 @@ export function SweetCare() {
         model.phase = "idle";
         model.banner = "Karen reached the icons";
         sfxLose();
+        haptic("lose");
         closeRound(model, false, model.elapsed);
         bump();
         return;
@@ -999,6 +1024,7 @@ export function SweetCare() {
       particleRef.current?.stars();
       unlockAudio();
       sfxWin();
+      haptic("win");
       startCelebration();
       closeRound(model, true, elapsed);
       bump();
@@ -1011,6 +1037,7 @@ export function SweetCare() {
       model.curtain = "card";
       model.phase = "idle";
       sfxLose();
+      haptic("lose");
       closeRound(model, false, model.elapsed);
       bump();
       return;
@@ -1097,6 +1124,7 @@ export function SweetCare() {
     );
     bump();
     sfxRoll();
+    haptic("swap");
     await wait(reducedMotion() ? 40 : 320);
     if (runRef.current !== run || !modelRef.current) return;
     if (!commitSwap(model.board, a, b)) {
@@ -1109,6 +1137,7 @@ export function SweetCare() {
       ].filter((roll): roll is { id: number; dir: 1 | -1 } => roll !== null);
       sfxRoll();
       sfxBad();
+      haptic("bad");
       model.form = 0;
       bump();
       await wait(reducedMotion() ? 40 : 280);
@@ -1155,6 +1184,7 @@ export function SweetCare() {
       model.phase = "idle";
       model.view = readView(model.board, new Set(), new Set([tile.id]));
       sfxSpecial();
+      haptic("special");
       bump();
       return;
     }
@@ -1162,6 +1192,7 @@ export function SweetCare() {
     const selected = model.selected;
     if (!selected) {
       model.selected = pos;
+      haptic("tap");
       bump();
       return;
     }
@@ -1193,6 +1224,7 @@ export function SweetCare() {
     model.moves += 5;
     model.banner = "Summoned!";
     model.phase = "idle";
+    haptic("special");
     const mid = { r: Math.floor((model.level.rows - 1) / 2), c: Math.floor((model.level.cols - 1) / 2) };
     summonImps(
       model,
@@ -1271,7 +1303,7 @@ export function SweetCare() {
       {screen === "map" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} /> : null}
       {screen === "help" ? <Help onBack={() => setScreen("settings")} /> : null}
       {screen === "settings" ? (
-        <Settings save={save} onBack={() => setScreen("home")} onSound={toggleSound} onMusic={toggleMusic} onHelp={() => { sfxClick(); setScreen("help"); }} />
+        <Settings save={save} onBack={() => setScreen("home")} onSound={toggleSound} onMusic={toggleMusic} onHaptics={toggleHaptics} onHelp={() => { sfxClick(); setScreen("help"); }} />
       ) : null}
       {screen === "dev" ? (
         <DevMenu
@@ -1484,7 +1516,9 @@ function DevMenu({
   );
 }
 
-function Settings({ save, onBack, onSound, onMusic, onHelp }: { save: SaveData; onBack: () => void; onSound: () => void; onMusic: () => void; onHelp: () => void }) {
+function Settings({ save, onBack, onSound, onMusic, onHaptics, onHelp }: { save: SaveData; onBack: () => void; onSound: () => void; onMusic: () => void; onHaptics: () => void; onHelp: () => void }) {
+  const [canBuzz, setCanBuzz] = useState(false);
+  useEffect(() => setCanBuzz(hapticsSupported()), []);
   return (
     <div className="column help">
       <div className="map-head">
@@ -1496,6 +1530,7 @@ function Settings({ save, onBack, onSound, onMusic, onHelp }: { save: SaveData; 
         <div className="stack">
           <button className="btn" type="button" onClick={onSound}>{save.sound ? "Sound on" : "Sound off"}</button>
           <button className="btn secondary" type="button" onClick={onMusic}>{save.music ? "Music on" : "Music off"}</button>
+          <button className="btn secondary" type="button" onClick={onHaptics} disabled={!canBuzz}>{!canBuzz ? "Vibration not available here" : save.haptics ? "Vibration on" : "Vibration off"}</button>
           <button className="btn secondary" type="button" onClick={onHelp}>How to care</button>
         </div>
       </div>

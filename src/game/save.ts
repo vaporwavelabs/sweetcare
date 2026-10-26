@@ -21,6 +21,7 @@ export interface SaveData {
   times: Record<string, number>;
   sound: boolean;
   music: boolean;
+  haptics: boolean;
   career: Career;
   gifts: string[];
   /** Level ids whose secret gift was opened. */
@@ -38,7 +39,7 @@ export interface SaveData {
 const KEY = "sweet-care-save-v1";
 
 export function defaultSave(): SaveData {
-  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [] };
+  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [] };
 }
 
 export function rememberOpened(opened: number[] | undefined, levelId: number): number[] {
@@ -62,6 +63,7 @@ export function loadSave(): SaveData {
       times: parsed.times ?? {},
       sound: parsed.sound !== false,
       music: parsed.music !== false,
+      haptics: parsed.haptics !== false,
       career: {
         ...defaultCareer(),
         ...parsed.career,
