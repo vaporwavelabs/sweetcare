@@ -7,6 +7,8 @@ let step = 0;
 let soundOn = true;
 let musicOn = true;
 let started = false;
+let sfxLevel = 0.8;
+let musicLevel = 0.5;
 
 const MELODY = [523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 392];
 
@@ -71,11 +73,18 @@ export function setAudioPrefs(sound: boolean, music: boolean) {
   applyPrefs();
 }
 
+/** Volumes run 0 to 100, as the settings sliders show them. */
+export function setVolumes(sfx: number, music: number) {
+  sfxLevel = Math.max(0, Math.min(1, sfx / 100));
+  musicLevel = Math.max(0, Math.min(1, music / 100));
+  applyPrefs();
+}
+
 function applyPrefs() {
   if (!ctx || !sfxBus || !musicBus) return;
   const now = ctx.currentTime;
-  sfxBus.gain.setTargetAtTime(soundOn ? 0.9 : 0.0001, now, 0.03);
-  musicBus.gain.setTargetAtTime(musicOn ? 0.11 : 0.0001, now, 0.05);
+  sfxBus.gain.setTargetAtTime(soundOn ? Math.max(0.0001, 1.1 * sfxLevel) : 0.0001, now, 0.03);
+  musicBus.gain.setTargetAtTime(musicOn ? Math.max(0.0001, 0.22 * musicLevel) : 0.0001, now, 0.05);
 }
 
 function tone(
@@ -184,7 +193,7 @@ function playBite(item: Bite) {
     const src = audio.createBufferSource();
     const gain = audio.createGain();
     src.buffer = buffer;
-    gain.gain.value = item.boost;
+    gain.gain.value = item.boost * sfxLevel;
     src.connect(gain);
     gain.connect(master);
     liveBites.push(src);
@@ -403,4 +412,14 @@ export function sfxGift(levelId: number) {
 export function stopMusic() {
   if (musicTimer) clearInterval(musicTimer);
   musicTimer = null;
+}
+
+/** Coins dropping into the wallet. */
+export function sfxCoins() {
+  [1318, 1568, 1976].forEach((freq, i) => tone(freq, 0.09, "triangle", 0.06, i * 0.07));
+  tone(2637, 0.16, "sine", 0.03, 0.22);
+}
+
+/** A player bumping into a hazard. */
+export function hurtBuzz() {
 }

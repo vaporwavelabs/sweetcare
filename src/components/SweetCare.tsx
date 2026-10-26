@@ -1,6 +1,6 @@
 import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { ChevronLeft, Star, Volume2, VolumeX } from "lucide-react";
+import { ChevronLeft, Coins, Gift, Star, Volume2, VolumeX } from "lucide-react";
 import { Cheer, CountUp, DocAvatar, portrait, ProfileScreen, SketchModel } from "@/components/Profile";
 import { applyRound, ACHIEVEMENTS, rankTitle } from "@/game/profile";
 import {
@@ -49,9 +49,11 @@ import {
 } from "@/game/levels";
 import {
   setAudioPrefs,
+  setVolumes,
   sfxBad,
   sfxBossHit,
   sfxClick,
+  sfxCoins,
   sfxCrack,
   sfxDeep,
   sfxFaah,
@@ -71,10 +73,13 @@ import {
   unlockAudio,
 } from "@/game/audio";
 import { GIFT_CARDS, cardForLevel, rememberGift } from "@/game/cards";
-import { haptic, hapticsSupported, setHapticsPref } from "@/game/haptics";
+import { haptic, setHapticStrength, setHapticsPref } from "@/game/haptics";
 import { generateWard } from "@/game/generator";
-import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
-import { shiftForDate } from "@/game/shifts";
+import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, resetProgress, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
+import { dayKey, shiftForDate } from "@/game/shifts";
+import { applyMotionPref, motionReduced, type Prefs } from "@/game/prefs";
+import { lossPayout, payWin, rewardsWaiting, spendFromBag, winPayout, type BoosterId, type Payout } from "@/game/rewards";
+import { OptionsScreen, RewardsScreen } from "@/components/Options";
 import { installErrorLog, note, readNotes, subscribeNotes, type Note } from "@/game/log";
 import { LiquidBoard, type LiquidHandle } from "@/components/LiquidBoard";
 import { ParticleLayer, type ParticleHandle } from "@/components/ParticleLayer";
@@ -123,6 +128,9 @@ interface Model {
   moves: number;
   collected: Record<Kind, number>;
   boosters: { blast: number; stripe: number; aid: number };
+  /** Bag boosters brought into the ward. Spent after the free one. */
+  bagStart: { blast: number; stripe: number; aid: number };
+  payout: Payout | null;
   phase: Phase;
   selected: Pos | null;
   hint: [Pos, Pos] | null;
@@ -160,7 +168,7 @@ interface Model {
   heal: number;
 }
 
-type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "cast" | "dev";
+type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "rewards" | "cast" | "dev";
 
 type Germ = { id: number; sprite: number; x: number; y: number; hp: number; max: number };
 
@@ -172,7 +180,13 @@ function formatClock(ms: number) {
 }
 
 function reducedMotion() {
-  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return motionReduced();
+}
+
+function applyPrefs(prefs: Prefs) {
+  setVolumes(prefs.sfxVolume, prefs.musicVolume);
+  setHapticStrength(prefs.hapticStrength);
+  applyMotionPref(prefs.motion);
 }
 
 function wait(ms: number) {
@@ -308,6 +322,7 @@ export function SweetCare() {
     setSave(loaded);
     setAudioPrefs(loaded.sound, loaded.music);
     setHapticsPref(loaded.haptics);
+    applyPrefs(loaded.prefs);
   }, []);
 
   useEffect(() => {
@@ -361,12 +376,14 @@ export function SweetCare() {
 
   function scheduleHint() {
     clearHint();
+    const delay = saveRef.current.prefs.hintDelay;
+    if (delay <= 0) return;
     hintRef.current = window.setTimeout(() => {
       const model = modelRef.current;
       if (!model || model.phase !== "idle" || model.outcome) return;
       model.hint = findHint(model.board);
       bump();
-    }, 7000);
+    }, delay * 1000);
   }
 
   function patchSave(recipe: (prev: SaveData) => SaveData, kind: "session" | "settings" | "checkpoint" = "session") {
@@ -394,6 +411,8 @@ export function SweetCare() {
           openedGifts: next.openedGifts ?? disk.openedGifts,
           loot: next.loot === true,
           decor: next.decor ?? [],
+          prefs: next.prefs,
+          wallet: next.wallet,
         };
         diskRef.current = stored;
         writeSave(stored);
@@ -443,6 +462,27 @@ export function SweetCare() {
       if (next.haptics) haptic("special");
       return next;
     }, "settings");
+  }
+
+  function setPrefs(patch: Partial<Prefs>) {
+    patchSave((prev) => {
+      const prefs = { ...prev.prefs, ...patch };
+      applyPrefs(prefs);
+      return { ...prev, prefs };
+    }, "settings");
+  }
+
+  function wipeProgress() {
+    patchSave((prev) => resetProgress(prev), "checkpoint");
+    setScreen("home");
+  }
+
+  /** Spend one booster. The free one goes first, then the bag pays. */
+  function drawBooster(model: Model, which: BoosterId) {
+    model.boosters[which] -= 1;
+    if (model.boosters[which] < model.bagStart[which]) {
+      patchSave((prev) => ({ ...prev, wallet: spendFromBag(prev.wallet, which) }), "settings");
+    }
   }
 
   function collectGift(levelId: number) {
@@ -566,7 +606,9 @@ export function SweetCare() {
       score: 0,
       moves: level.moves,
       collected: freshCollected(),
-      boosters: { blast: 1, stripe: 1, aid: 1 },
+      boosters: { blast: 1 + saveRef.current.wallet.bag.blast, stripe: 1 + saveRef.current.wallet.bag.stripe, aid: 1 + saveRef.current.wallet.bag.aid },
+      bagStart: { ...saveRef.current.wallet.bag },
+      payout: null,
       phase: "busy",
       selected: null,
       hint: null,
@@ -752,7 +794,7 @@ export function SweetCare() {
     model.rolls = [];
     model.banner = plan.banner;
     model.dive = plan.combo;
-    model.shake = plan.removals.length >= 8 || plan.combo >= 6;
+    model.shake = saveRef.current.prefs.shake && (plan.removals.length >= 8 || plan.combo >= 6);
     const center = centroid(plan.removals);
     const floatId = ++seq.current;
     model.floats = [...model.floats.slice(-4), { id: floatId, text: `+${gained}`, r: center.r, c: center.c }];
@@ -922,10 +964,24 @@ export function SweetCare() {
     );
     model.rankedUp = applied.rankedUp;
     model.savedNow = won;
+    const today = dayKey();
+    const payout = won
+      ? winPayout(prev.wallet, {
+          levelId: model.level.id,
+          stars: model.stars,
+          prevStars: prev.stars[key] ?? 0,
+          movesLeft: Math.max(0, model.moves),
+          boss: Boolean(model.level.bossHp || model.level.encounter === "microbe"),
+          today,
+        })
+      : lossPayout();
+    model.payout = payout;
     patchSave((current) => {
       const base = won ? releaseAttempt(recordWin(current, model.level.id, model.stars, model.score, elapsed), model.level.id) : current;
-      return { ...base, career: applied.career };
+      const wallet = won ? payWin(current.wallet, payout, today) : { ...current.wallet, coins: current.wallet.coins + payout.total, earned: current.wallet.earned + payout.total };
+      return { ...base, career: applied.career, wallet };
     }, won ? "checkpoint" : "session");
+    if (!won) patchSave((current) => current, "settings");
   }
 
   onBossTick.current = (dt, paint) => {
@@ -1169,7 +1225,7 @@ export function SweetCare() {
       if (model.boosters.blast <= 0) return;
       const plan = planCross(model.board, pos);
       if (!plan) return;
-      model.boosters.blast -= 1;
+      drawBooster(model, "blast");
       model.phase = "busy";
       model.selected = null;
       clearHint();
@@ -1179,7 +1235,7 @@ export function SweetCare() {
     if (model.phase === "aim-stripe") {
       const tile = model.board[pos.r]?.[pos.c];
       if (!tile || model.boosters.stripe <= 0) return;
-      model.boosters.stripe -= 1;
+      drawBooster(model, "stripe");
       upgradeSpecial(tile, pos.c);
       model.phase = "idle";
       model.view = readView(model.board, new Set(), new Set([tile.id]));
@@ -1220,7 +1276,7 @@ export function SweetCare() {
     const model = modelRef.current;
     if (!model || model.phase === "busy" || model.outcome || model.boosters.aid <= 0) return;
     unlockAudio();
-    model.boosters.aid -= 1;
+    drawBooster(model, "aid");
     model.moves += 5;
     model.banner = "Summoned!";
     model.phase = "idle";
@@ -1282,6 +1338,7 @@ export function SweetCare() {
           onContinue={() => openLevel(continueLevel(save))}
           onMap={() => { sfxClick(); setScreen("map"); }}
           onSettings={() => { sfxClick(); setScreen("settings"); }}
+          onRewards={() => { sfxClick(); setScreen("rewards"); }}
           onDev={() => { sfxClick(); setScreen("dev"); }}
           onSound={toggleSound}
           onProfile={openProfile}
@@ -1303,7 +1360,27 @@ export function SweetCare() {
       {screen === "map" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} /> : null}
       {screen === "help" ? <Help onBack={() => setScreen("settings")} /> : null}
       {screen === "settings" ? (
-        <Settings save={save} onBack={() => setScreen("home")} onSound={toggleSound} onMusic={toggleMusic} onHaptics={toggleHaptics} onHelp={() => { sfxClick(); setScreen("help"); }} />
+        <OptionsScreen
+          save={save}
+          onBack={() => setScreen("home")}
+          onSound={toggleSound}
+          onMusic={toggleMusic}
+          onHaptics={toggleHaptics}
+          onPrefs={setPrefs}
+          onHelp={() => { sfxClick(); setScreen("help"); }}
+          onReset={wipeProgress}
+        />
+      ) : null}
+      {screen === "rewards" ? (
+        <RewardsScreen
+          save={save}
+          onBack={() => setScreen("home")}
+          onWallet={(recipe) => {
+            unlockAudio();
+            sfxCoins();
+            patchSave((prev) => ({ ...prev, wallet: recipe(prev.wallet, totalStars(prev)) }), "settings");
+          }}
+        />
       ) : null}
       {screen === "dev" ? (
         <DevMenu
@@ -1434,8 +1511,9 @@ function ShiftChip() {
   );
 }
 
-function Home({ save, onNew, onContinue, onMap, onSettings, onDev, onSound, onProfile, notes, logOpen, onToggleLog }: { save: SaveData; onNew: () => void; onContinue: () => void; onMap: () => void; onSettings: () => void; onDev: () => void; onSound: () => void; onProfile: () => void; notes: Note[]; logOpen: boolean; onToggleLog: () => void }) {
+function Home({ save, onNew, onContinue, onMap, onSettings, onRewards, onDev, onSound, onProfile, notes, logOpen, onToggleLog }: { save: SaveData; onNew: () => void; onContinue: () => void; onMap: () => void; onSettings: () => void; onRewards: () => void; onDev: () => void; onSound: () => void; onProfile: () => void; notes: Note[]; logOpen: boolean; onToggleLog: () => void }) {
   const played = save.unlocked > 1 || Object.values(save.stars).some((n) => n > 0);
+  const waiting = rewardsWaiting(save.wallet, totalStars(save), dayKey());
   return (
     <div className="column home">
       <div className="crush-nav">
@@ -1450,10 +1528,16 @@ function Home({ save, onNew, onContinue, onMap, onSettings, onDev, onSound, onPr
       <div className="scroll">
         <p className="tagline">Match the sweets. Mend the ward.</p>
         <ShiftChip />
-        <p className="star-total home-stars">
-          <Star className="star on" aria-hidden />
-          {totalStars(save)}/45
-        </p>
+        <div className="home-purse">
+          <p className="star-total home-stars">
+            <Star className="star on" aria-hidden />
+            {totalStars(save)}/{LEVELS.length * 3}
+          </p>
+          <p className="star-total coin-total">
+            <Coins className="coin-icon" aria-hidden />
+            {save.wallet.coins}
+          </p>
+        </div>
         <div className="hero-row" aria-hidden>
           {HOSPITAL_KINDS.map((kind) => (
             <img key={kind} src={`/sprites/${kind}.png`} alt="" />
@@ -1463,6 +1547,11 @@ function Home({ save, onNew, onContinue, onMap, onSettings, onDev, onSound, onPr
           <button className="btn" type="button" onClick={onNew}>New Game</button>
           <button className="btn" type="button" onClick={onContinue} disabled={!played}>Continue</button>
           <button className="btn secondary" type="button" onClick={onMap}>World map</button>
+          <button className={waiting ? "btn rewards-btn ready" : "btn secondary rewards-btn"} type="button" onClick={onRewards}>
+            <Gift aria-hidden />
+            Rewards
+            {waiting ? <span className="ready-dot" aria-label={`${waiting} ready`}>{waiting}</span> : null}
+          </button>
           <button className="btn secondary" type="button" onClick={onSettings}>Settings</button>
           <button className="btn secondary" type="button" onClick={onDev}>Dev</button>
           <button className="btn secondary" type="button" onClick={onToggleLog}>Launch log{notes.length ? ` (${notes.length})` : ""}</button>
@@ -1510,28 +1599,6 @@ function DevMenu({
               {level.id}. {level.name}{level.bossHp ? " · Boss" : ""}{level.encounter === "microbe" ? " · Microbes" : ""}{level.encounter === "heal" ? " · Heal" : ""}
             </button>
           ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Settings({ save, onBack, onSound, onMusic, onHaptics, onHelp }: { save: SaveData; onBack: () => void; onSound: () => void; onMusic: () => void; onHaptics: () => void; onHelp: () => void }) {
-  const [canBuzz, setCanBuzz] = useState(false);
-  useEffect(() => setCanBuzz(hapticsSupported()), []);
-  return (
-    <div className="column help">
-      <div className="map-head">
-        <button className="icon-btn" type="button" onClick={onBack} aria-label="Back"><ChevronLeft /></button>
-        <h2>Settings</h2>
-        <span />
-      </div>
-      <div className="scroll">
-        <div className="stack">
-          <button className="btn" type="button" onClick={onSound}>{save.sound ? "Sound on" : "Sound off"}</button>
-          <button className="btn secondary" type="button" onClick={onMusic}>{save.music ? "Music on" : "Music off"}</button>
-          <button className="btn secondary" type="button" onClick={onHaptics} disabled={!canBuzz}>{!canBuzz ? "Vibration not available here" : save.haptics ? "Vibration on" : "Vibration off"}</button>
-          <button className="btn secondary" type="button" onClick={onHelp}>How to care</button>
         </div>
       </div>
     </div>
@@ -2278,6 +2345,7 @@ function Outro({
               {destroyed.length === 0 ? <span>None yet</span> : null}
             </div>
           </div>
+          {model.payout ? <PayoutCard payout={model.payout} /> : null}
           {model.badges.length > 0 ? <BadgeFlash badges={model.badges} /> : <p className="summary-note">No badges this round.</p>}
           <button className="btn" type="button" onClick={onAdvance}>Next</button>
         </div>
@@ -2293,6 +2361,9 @@ function Outro({
       <Stars n={won ? model.stars : 0} />
       {model.savedNow ? (
         <p className="save-banner">Progress saved.</p>
+      ) : null}
+      {model.payout ? (
+        <p className="coin-banner"><Coins className="coin-icon" aria-hidden />+{model.payout.total} coins · {save.wallet.coins} in your purse</p>
       ) : null}
       {won && model.level.id === 5 ? (
         <p className="save-banner">Loot case unlocked. Open the suitcase in your profile to decorate home base.</p>
@@ -2311,6 +2382,20 @@ function Outro({
       </div>
       {dock}
       {reveal}
+    </div>
+  );
+}
+
+function PayoutCard({ payout }: { payout: Payout }) {
+  return (
+    <div className="payout" aria-label={`${payout.total} coins earned`}>
+      <span className="kicker">Coins earned</span>
+      <ul>
+        {payout.lines.map((line) => (
+          <li key={line.label}><span>{line.label}</span><b>+{line.coins}</b></li>
+        ))}
+      </ul>
+      <p className="payout-total"><Coins className="coin-icon" aria-hidden />+<CountUp value={payout.total} /></p>
     </div>
   );
 }

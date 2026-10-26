@@ -1,6 +1,11 @@
+import type { HapticStrength } from "./prefs.ts";
+
 export type Cue = "tap" | "swap" | "bad" | "match" | "special" | "power" | "boss-hit" | "hurt" | "win" | "lose";
 
 let enabled = true;
+let strength: HapticStrength = "normal";
+
+const SCALE: Record<HapticStrength, number> = { light: 0.55, normal: 1, strong: 1.6 };
 let lastAt = 0;
 const cueAt = new Map<Cue, number>();
 
@@ -18,6 +23,16 @@ export function hapticsSupported(): boolean {
 export function setHapticsPref(on: boolean) {
   enabled = on;
   if (!on && hapticsSupported()) navigator.vibrate(0);
+}
+
+export function setHapticStrength(level: HapticStrength) {
+  strength = level;
+}
+
+/** Scales the buzz parts of a pattern. The pauses keep their length. */
+export function scalePattern(pattern: number[], level: HapticStrength): number[] {
+  const k = SCALE[level];
+  return pattern.map((ms, index) => (index % 2 === 0 ? Math.max(4, Math.round(ms * k)) : ms));
 }
 
 /** Vibration pattern in ms (on, off, on, ...). A deeper chain hits harder and longer. */
@@ -70,7 +85,7 @@ export function haptic(cue: Cue, combo = 1) {
   const now = typeof performance !== "undefined" ? performance.now() : Date.now();
   if (!admit(cue, now)) return;
   try {
-    navigator.vibrate(patternFor(cue, combo));
+    navigator.vibrate(scalePattern(patternFor(cue, combo), strength));
   } catch {
     /* a blocked vibrate never blocks a move */
   }
