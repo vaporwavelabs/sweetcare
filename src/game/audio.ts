@@ -272,6 +272,31 @@ export function sfxBossHit() {
   tone(90, 0.09, "sine", 0.06);
 }
 
+/** Karen winding up. Two rising beeps, like a monitor alarm. */
+export function sfxBossWarn() {
+  tone(660, 0.09, "square", 0.04);
+  tone(880, 0.12, "square", 0.045, 0.13);
+}
+
+/** Karen's attack landing. */
+export function sfxBossStrike() {
+  tone(120, 0.18, "sawtooth", 0.06, 0, 55);
+  tone(70, 0.22, "sine", 0.09, 0.02);
+}
+
+/** A big hit broke her windup. */
+export function sfxInterrupt() {
+  tone(520, 0.08, "triangle", 0.08, 0, 1040);
+  tone(1320, 0.12, "sine", 0.05, 0.06, 1760);
+}
+
+/** She enters a new phase. A falling growl and a sting on top. */
+export function sfxBossPhase() {
+  tone(220, 0.45, "sawtooth", 0.05, 0, 82);
+  tone(330, 0.3, "square", 0.03, 0.05, 110);
+  tone(988, 0.16, "triangle", 0.05, 0.32);
+}
+
 /** Glass breaking, then a wet catch. */
 export function sfxShatter() {
   const audio = ctx;
