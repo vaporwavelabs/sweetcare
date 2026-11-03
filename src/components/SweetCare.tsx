@@ -2562,6 +2562,43 @@ function Play({
   const cols = model.level.cols;
   const rows = model.level.rows;
   const boardH = Math.round(side * rows / cols);
+  const lifePct = Math.max(0, Math.min(100, model.playerHp));
+  const lifeBar = (
+    <div className={`vital life${lifePct <= 30 ? " low" : ""}`}>
+      <span className="vital-tag">You</span>
+      <div className="vital-bar" role="meter" aria-label="Your life" aria-valuenow={Math.ceil(lifePct)} aria-valuemin={0} aria-valuemax={100}>
+        <span style={{ width: `${lifePct}%` }} />
+      </div>
+      <b className="vital-num">{Math.ceil(lifePct)}</b>
+    </div>
+  );
+  const bossPct = boss && bossMax ? Math.max(0, Math.min(100, (boss.hp / bossMax) * 100)) : 0;
+  const vitals = boss ? (
+    <div className="hud-vitals">
+      <div className={`vital foe${boss.guard > 0 ? " guarded" : ""}`}>
+        <span className="vital-tag">{boss.profile.name.split(" ").pop()}</span>
+        <div className="vital-bar" role="meter" aria-label={`${boss.profile.name} health`} aria-valuenow={Math.max(0, boss.hp)} aria-valuemin={0} aria-valuemax={bossMax}>
+          <em style={{ width: `${bossPct}%` }} />
+          <span style={{ width: `${bossPct}%` }} />
+          <s style={{ left: "33.3%" }} />
+          <s style={{ left: "66.6%" }} />
+        </div>
+        <b className="vital-num">{boss.hp <= 0 ? "Down" : boss.guard > 0 ? "Guard" : Math.ceil(boss.hp)}</b>
+      </div>
+      {lifeBar}
+    </div>
+  ) : microbes ? (
+    <div className="hud-vitals">
+      <div className="vital foe germs">
+        <span className="vital-tag">Germs</span>
+        <div className="vital-bar" role="meter" aria-label="Microbes fended off" aria-valuenow={model.germKills} aria-valuemin={0} aria-valuemax={germQuota}>
+          <span style={{ width: `${Math.min(100, Math.round((model.germKills / germQuota) * 100))}%` }} />
+        </div>
+        <b className="vital-num">{model.germKills}/{germQuota}</b>
+      </div>
+      {lifeBar}
+    </div>
+  ) : null;
   const grid = (
     <>
       <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} holes={model.mask} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
@@ -2618,15 +2655,16 @@ function Play({
           <DocAvatar career={save.career} />
         </button>
       </div>
-      <section className="crush-hud" aria-label="Ward status">
+      <section className={["crush-hud", vitals ? "with-vitals" : "", boss ? `phase-${boss.phase}` : "", (boss || microbes) && model.sting > 0 ? "stung" : ""].filter(Boolean).join(" ")} aria-label="Ward status">
         <div className="hud-level">
           <b className="lvl-num">{model.level.custom ? "✎" : model.level.id}</b>
           <div className="lvl-copy">
             <div className="lvl-line">
               <span className="lvl-kicker">{model.level.boss || model.level.shiftLabel || "Ward"}</span>
               <span className="lvl-name">{model.level.name}</span>
+              {boss ? <i className="phase-pips" aria-label={`Phase ${boss.phase + 1} of 3`}>{[0, 1, 2].map((n) => <b key={n} className={n <= boss.phase ? "on" : ""} />)}</i> : null}
             </div>
-            <div className="bar" aria-hidden><span style={{ width: `${Math.round(frac * 100)}%` }} /></div>
+            {vitals ?? <div className="bar" aria-hidden><span style={{ width: `${Math.round(frac * 100)}%` }} /></div>}
           </div>
         </div>
         <div className="hud-score">
@@ -2658,47 +2696,9 @@ function Play({
           />
         ) : null}
       </div>
-      {boss ? (
-        <div className={`boss-strip phase-${boss.phase}${model.sting > 0 ? " stung" : ""}`}>
-          <div className="boss-meters">
-            <div>
-              <div className="meter-label">
-                <span>{boss.profile.name}<i className="phase-pips" aria-label={`Phase ${boss.phase + 1} of 3`}>{[0, 1, 2].map((n) => <b key={n} className={n <= boss.phase ? "on" : ""} />)}</i></span>
-                <span>{boss.hp <= 0 ? "Down" : boss.guard > 0 ? "Guard" : boss.hp}</span>
-              </div>
-              <div className={`boss-bar${boss.guard > 0 ? " guarded" : ""}`} role="meter" aria-label={`${boss.profile.name} health`} aria-valuenow={boss.hp} aria-valuemin={0} aria-valuemax={bossMax}>
-                <em style={{ width: `${Math.round((boss.hp / bossMax) * 100)}%` }} />
-                <span style={{ width: `${Math.round((boss.hp / bossMax) * 100)}%` }} />
-                <s style={{ left: "33.3%" }} />
-                <s style={{ left: "66.6%" }} />
-              </div>
-            </div>
-            <div>
-              <div className="meter-label"><span>Your life</span><span>{Math.ceil(model.playerHp)}</span></div>
-              <div className="boss-bar life-bar" role="meter" aria-label="Your life" aria-valuenow={Math.ceil(model.playerHp)} aria-valuemin={0} aria-valuemax={100}>
-                <span style={{ width: `${Math.max(0, model.playerHp)}%` }} />
-              </div>
-            </div>
-          </div>
-          {model.emergency ? <EmergencyMeter state={model.emergency} flood={floodLevel(model.jelly, model.mask)} /> : null}
-        </div>
-      ) : null}
-      {microbes ? (
-        <div className="boss-strip">
-          <div className="boss-meters">
-            <div>
-              <div className="meter-label"><span>Fended off</span><span>{model.germKills}/{germQuota}</span></div>
-              <div className="boss-bar" role="meter" aria-label="Microbes fended off" aria-valuenow={model.germKills} aria-valuemin={0} aria-valuemax={germQuota}>
-                <span style={{ width: `${Math.round((model.germKills / germQuota) * 100)}%` }} />
-              </div>
-            </div>
-            <div>
-              <div className="meter-label"><span>Your life</span><span>{Math.ceil(model.playerHp)}</span></div>
-              <div className="boss-bar life-bar" role="meter" aria-label="Your life" aria-valuenow={Math.ceil(model.playerHp)} aria-valuemin={0} aria-valuemax={100}>
-                <span style={{ width: `${Math.max(0, model.playerHp)}%` }} />
-              </div>
-            </div>
-          </div>
+      {boss && model.emergency ? (
+        <div className="boss-strip emergency-strip">
+          <EmergencyMeter state={model.emergency} flood={floodLevel(model.jelly, model.mask)} />
         </div>
       ) : null}
       <div className={`play-stage${arena ? " boss-stage" : ""}`} ref={arena ? undefined : slotRef}>
