@@ -4,6 +4,7 @@ import { dayKey, shiftForDate, type ShiftId } from "./shifts.ts";
 import { defaultPrefs, readPrefs, type Prefs } from "./prefs.ts";
 import { defaultWallet, readWallet, type Wallet } from "./rewards.ts";
 import { FORM_SIZE, type FormEntry } from "./wardEvolution.ts";
+import { defaultEvolution, readEvolution, type Evolution } from "./evolution.ts";
 
 export interface DecorPin {
   id: string;
@@ -41,6 +42,8 @@ export interface SaveData {
   wallet: Wallet;
   /** Last few campaign goal-ward results. Rolled wards evolve easier or harder from it. */
   form: FormEntry[];
+  /** Care Points, evolution stage and win streak (src/game/evolution.ts). */
+  evolution: Evolution;
 }
 
 const KEY = "sweet-care-save-v1";
@@ -48,7 +51,7 @@ const KEY = "sweet-care-save-v1";
 const LAST_LEVEL = 30;
 
 export function defaultSave(): SaveData {
-  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [], prefs: defaultPrefs(), wallet: defaultWallet(), form: [] };
+  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [], prefs: defaultPrefs(), wallet: defaultWallet(), form: [], evolution: defaultEvolution() };
 }
 
 export function rememberOpened(opened: number[] | undefined, levelId: number): number[] {
@@ -91,6 +94,7 @@ export function loadSave(): SaveData {
       prefs: readPrefs(parsed.prefs),
       wallet: readWallet(parsed.wallet),
       form: readForm(parsed.form),
+      evolution: readEvolution(parsed.evolution),
     };
   } catch {
     return defaultSave();
