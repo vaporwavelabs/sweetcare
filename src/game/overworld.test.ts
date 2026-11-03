@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  BUILDINGS,
+  MAIN_ROAD,
+  SPURS,
+  buildingAt,
+  clearLine,
+  findPath,
+  walkable,
   MAP_H,
   MAP_W,
   WARD_NODES,
@@ -120,12 +127,102 @@ describe("camera", () => {
 describe("road and spawn", () => {
   it("lights the road up to the open ward", () => {
     const { walked, ahead } = roadSplit(4);
-    assert.equal(walked.length, 4);
-    assert.equal(ahead.length, 12);
+    assert.deepEqual(walked[walked.length - 1], standFor(nodeById(4)!));
+    assert.deepEqual(ahead[0], standFor(nodeById(4)!));
+    assert.deepEqual(ahead[ahead.length - 1], standFor(nodeById(15)!));
   });
 
   it("spawns beside the next ward when nothing is remembered, or the spot is in the sea", () => {
     assert.equal(nearestNode(spawnPoint(null, 7))?.id, 7);
     assert.equal(nearestNode(spawnPoint({ x: 5, y: 830, view: "roam" }, 2))?.id, 2);
+  });
+});
+
+describe("buildings", () => {
+  it("gives every site a solid footprint", () => {
+    for (const building of BUILDINGS) {
+      const cx = building.poly.reduce((sum, p) => sum + p.x, 0) / building.poly.length;
+      const cy = building.poly.reduce((sum, p) => sum + p.y, 0) / building.poly.length;
+      assert.equal(buildingAt({ x: cx, y: cy })?.id, building.id);
+      assert.equal(walkable({ x: cx, y: cy }), false);
+    }
+  });
+
+  it("stops the walker at the hospital wall and lets it slide along", () => {
+    // From the doorstep of ward 1, push straight up into the hospital.
+    const start = standFor(nodeById(1)!);
+    let pos = start;
+    for (let i = 0; i < 300; i++) pos = stepWalker(pos, 0, -300, 1 / 60);
+    assert.ok(walkable(pos));
+    assert.ok(pos.y > start.y - 40, "walked into the hospital");
+    // Push up and right: it should slide along the front wall to the right.
+    let slid = pos;
+    for (let i = 0; i < 120; i++) slid = stepWalker(slid, 300, -300, 1 / 60);
+    assert.ok(slid.x > pos.x + 20);
+  });
+
+  it("puts every doorstep outside the buildings", () => {
+    for (const node of WARD_NODES) assert.ok(walkable(standFor(node)), `ward ${node.id} doorstep is inside a wall`);
+  });
+});
+
+describe("doorsteps", () => {
+  it("keeps doorsteps far enough apart that each one picks its own ward", () => {
+    for (const a of WARD_NODES) {
+      for (const b of WARD_NODES) {
+        if (a.id >= b.id) continue;
+        const da = standFor(a);
+        const db = standFor(b);
+        assert.ok(Math.hypot(da.x - db.x, da.y - db.y) > 44, `doorsteps ${a.id} and ${b.id} overlap`);
+      }
+    }
+  });
+});
+
+describe("paths", () => {
+  const segmentsClear = (path: { x: number; y: number }[], from: { x: number; y: number }) => {
+    let prev = from;
+    for (const p of path) {
+      assert.ok(clearLine(prev, p), "path cuts through a wall");
+      prev = p;
+    }
+  };
+
+  it("connects every ward to every other one without crossing a building", () => {
+    const home = standFor(nodeById(1)!);
+    for (const node of WARD_NODES) {
+      const path = findPath(home, standFor(node));
+      assert.ok(path.length > 0, `no way to ward ${node.id}`);
+      const end = path[path.length - 1]!;
+      assert.ok(Math.hypot(end.x - standFor(node).x, end.y - standFor(node).y) < 12, `stops short of ward ${node.id}`);
+      segmentsClear(path, home);
+    }
+  });
+
+  it("walks round the clinic rather than through it", () => {
+    const a = standFor(nodeById(17)!);
+    const b = standFor(nodeById(7)!);
+    assert.equal(clearLine(a, b), false);
+    const path = findPath(a, b);
+    assert.ok(path.length >= 2);
+    segmentsClear(path, a);
+  });
+
+  it("draws every road leg along open ground", () => {
+    for (let i = 1; i < MAIN_ROAD.length; i++) assert.ok(findPath(standFor(nodeById(MAIN_ROAD[i - 1]!)!), standFor(nodeById(MAIN_ROAD[i]!)!)).length);
+    for (const [a, b] of SPURS) assert.ok(findPath(standFor(nodeById(a)!), standFor(nodeById(b)!)).length, `spur ${a}-${b}`);
+  });
+
+  it("follows a path to the door in a walk", () => {
+    let pos = standFor(nodeById(24)!);
+    const path = findPath(pos, standFor(nodeById(12)!));
+    for (let i = 0; i < 2000 && path.length; i++) {
+      const step = stepToward(pos, path[0]!, 1 / 60);
+      pos = step.pos;
+      assert.ok(walkable(pos));
+      if (step.arrived) path.shift();
+    }
+    assert.equal(path.length, 0);
+    assert.equal(nearestNode(pos)?.id, 12);
   });
 });

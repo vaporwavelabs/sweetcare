@@ -1939,6 +1939,7 @@ export function SweetCare() {
           onCollect={collectGift}
           onClassic={() => pickMapView("classic")}
           renderReveal={(id, close) => <CardReveal levelId={id} onClose={close} />}
+          onStep={(index) => playSfx("map.step", { index })}
         />
       ) : null}
       {screen === "map" && mapView === "classic" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} onRoam={() => pickMapView("roam")} /> : null}

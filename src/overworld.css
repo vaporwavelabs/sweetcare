@@ -100,10 +100,86 @@
   cursor: pointer;
 }
 
-/* When the walker stands at a ward, its pin rises over their head like a marker. */
+/* The ward the walker is standing at grows and glows. */
 .roam-pin.focus {
   z-index: 4;
-  transform: translate(-50%, -50%) scale(var(--inv, 1)) translateY(calc(-1 * var(--walker-lift, 3.6rem)));
+  transform: translate(-50%, -50%) scale(var(--inv, 1)) scale(1.12);
+  filter: drop-shadow(0 0 0.5rem rgba(255, 201, 74, 0.95));
+}
+
+/* Doorsteps: where to stand to enter a ward. Drawn on the ground in front of each site. */
+.roam-door {
+  position: absolute;
+  z-index: 1;
+  width: 2.6rem;
+  height: 1rem;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(var(--inv, 1));
+  background: radial-gradient(closest-side, rgba(255, 247, 251, 0.85), rgba(255, 247, 251, 0.25) 70%, transparent);
+  box-shadow: 0 0 0 0.12rem rgba(227, 18, 120, 0.55);
+  pointer-events: none;
+}
+
+.roam-door.boss {
+  box-shadow: 0 0 0 0.12rem rgba(255, 51, 92, 0.8);
+}
+
+.roam-door.locked {
+  opacity: 0.35;
+  box-shadow: none;
+}
+
+.roam-door.focus {
+  background: radial-gradient(closest-side, rgba(255, 233, 160, 0.95), rgba(255, 201, 74, 0.4) 70%, transparent);
+  box-shadow: 0 0 0 0.16rem var(--color-gold), 0 0 0.8rem var(--color-gold);
+  animation: roam-door 1.2s ease-in-out infinite;
+}
+
+@keyframes roam-door {
+  50% {
+    scale: 1.12;
+  }
+}
+
+/* Evolution extras on the walker. */
+.roam-halo {
+  position: absolute;
+  left: 0;
+  bottom: calc(var(--walker-size, 3.1rem) + 0.05rem);
+  width: 1.7rem;
+  height: 0.5rem;
+  translate: -50% 0;
+  border-radius: 50%;
+  border: 0.16rem solid #ffd86b;
+  box-shadow: 0 0 0.5rem #ffd86b, inset 0 0 0.3rem #ffd86b;
+  animation: roam-halo 2s ease-in-out infinite;
+}
+
+@keyframes roam-halo {
+  50% {
+    translate: -50% -0.15rem;
+  }
+}
+
+.roam-wings {
+  position: absolute;
+  left: 0;
+  bottom: calc(var(--walker-size, 3.1rem) * 0.35);
+  width: calc(var(--walker-size, 3.1rem) * 1.25);
+  height: calc(var(--walker-size, 3.1rem) * 0.6);
+  translate: -50% 0;
+  background:
+    radial-gradient(ellipse at 100% 60%, rgba(255, 200, 235, 0.95) 0 45%, transparent 47%) left / 50% 100% no-repeat,
+    radial-gradient(ellipse at 0% 60%, rgba(200, 235, 255, 0.95) 0 45%, transparent 47%) right / 50% 100% no-repeat;
+  filter: drop-shadow(0 0 0.3rem rgba(255, 255, 255, 0.9));
+  transform-origin: 50% 80%;
+  animation: roam-flap 0.9s ease-in-out infinite;
+}
+
+@keyframes roam-flap {
+  50% {
+    transform: scaleX(0.82);
+  }
 }
 
 .roam-pin-face {
@@ -582,6 +658,9 @@
 :root[data-motion="reduced"] .roam-pin.next::after,
 :root[data-motion="reduced"] .roam-roads .road.walked,
 :root[data-motion="reduced"] .roam-aura,
-:root[data-motion="reduced"] .roam-pin-gift {
+:root[data-motion="reduced"] .roam-pin-gift,
+:root[data-motion="reduced"] .roam-door.focus,
+:root[data-motion="reduced"] .roam-halo,
+:root[data-motion="reduced"] .roam-wings {
   animation: none;
 }

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ChevronLeft, Gift, Lock, Map as MapIcon, Navigation, Play, Skull, Star } from "lucide-react";
+import { LevelSheet } from "@/components/LevelSheet";
 import { portrait } from "@/components/Profile";
 import { sfxClick, sfxGift, unlockAudio } from "@/game/audio";
+import { walkerLook } from "@/game/evolution";
 import { haptic } from "@/game/haptics";
 import { generateWard } from "@/game/generator";
 import { getLevel, type LevelDef } from "@/game/levels";
@@ -13,7 +15,10 @@ import {
   WARD_NODES,
   ZONE_NAMES,
   cameraFor,
+  findPath,
   nearestNode,
+  pinNear,
+  roadBetween,
   nodeById,
   nodeState,
   readRoam,
@@ -45,10 +50,15 @@ export interface WalkerSkin {
   aura?: string;
   size?: number;
   label?: string;
+  /** Evolution extras: a golden halo and candy wings. */
+  halo?: boolean;
+  wings?: boolean;
 }
 
+/** The nurse as they look at their current evolution stage. */
 export function defaultWalkerSkin(save: SaveData): WalkerSkin {
-  return { idle: portrait(save.career), label: "Your nurse" };
+  const look = walkerLook(save.evolution);
+  return { idle: portrait(save.career), label: look.title, aura: look.aura ?? undefined, size: look.size, halo: look.halo, wings: look.wings };
 }
 
 const KIND_LABEL: Record<NodeKind, string> = {
@@ -91,7 +101,7 @@ interface Props {
   renderReveal?: (levelId: number, close: () => void) => ReactNode;
   walker?: WalkerSkin;
   /** Called on each footfall while walking, for a step sound. */
-  onStep?: () => void;
+  onStep?: (index: number) => void;
 }
 
 export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderReveal, walker, onStep }: Props) {
@@ -103,7 +113,7 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
   const spriteRef = useRef<HTMLImageElement>(null);
   const dustRef = useRef<HTMLDivElement>(null);
   const posRef = useRef<Pt>(spawnPoint(readRoam(), nextId));
-  const targetRef = useRef<{ at: Pt; node: number | null } | null>(null);
+  const targetRef = useRef<{ path: Pt[]; node: number | null } | null>(null);
   const keysRef = useRef(new Set<string>());
   const stickRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const camRef = useRef<Camera | null>(null);
@@ -114,6 +124,7 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
   const [zone, setZone] = useState<{ id: ZoneId; at: number } | null>(null);
   const [moving, setMoving] = useState(false);
   const [opening, setOpening] = useState<number | null>(null);
+  const [sheet, setSheet] = useState<number | null>(null);
   const [stick, setStick] = useState<{ x: number; y: number } | null>(null);
   const road = useMemo(() => roadSplit(save.unlocked), [save.unlocked]);
   const reduced = typeof document !== "undefined" && document.documentElement.dataset.motion === "reduced";
@@ -143,9 +154,13 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
         targetRef.current = null;
         pos = stepWalker(pos, vx, vy, dt);
       } else if (targetRef.current) {
-        const result = stepToward(pos, targetRef.current.at, dt);
+        const route = targetRef.current;
+        const result = stepToward(pos, route.path[0]!, dt);
         pos = result.pos;
-        if (result.arrived) targetRef.current = null;
+        if (result.arrived) {
+          route.path.shift();
+          if (!route.path.length || result.blocked) targetRef.current = null;
+        }
       }
       posRef.current = pos;
       const dx = pos.x - before.x;
@@ -180,7 +195,7 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
         if (stepClock > 0.3) {
           stepClock = 0;
           frame++;
-          stepRef.current?.();
+          stepRef.current?.(frame);
           const sprite = spriteRef.current;
           if (sprite && skin.walk?.length) sprite.src = skin.walk[frame % skin.walk.length]!;
         }
@@ -239,6 +254,17 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
     onPick(id);
   }
 
+  function preview(id: number) {
+    if (nodeState(save, id).locked) {
+      haptic("bad");
+      return;
+    }
+    unlockAudio();
+    sfxClick();
+    keysRef.current.clear();
+    setSheet(id);
+  }
+
   function openGift(id: number) {
     unlockAudio();
     sfxGift(id);
@@ -250,7 +276,8 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
     const node = nodeById(id);
     if (!node) return;
     unlockAudio();
-    targetRef.current = { at: standFor(node), node: id };
+    const path = findPath(posRef.current, standFor(node));
+    targetRef.current = path.length ? { path, node: id } : null;
   }
 
   // Keyboard: arrows or WASD to walk, Enter / Space / E to enter, Escape to leave.
@@ -260,7 +287,7 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
       ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right",
     };
     const down = (event: KeyboardEvent) => {
-      if (opening != null) return;
+      if (opening != null || sheet != null) return;
       const dir = map[event.code];
       if (dir) {
         keysRef.current.add(dir);
@@ -271,7 +298,7 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
         const target = event.target as HTMLElement | null;
         if (target?.tagName === "BUTTON") return;
         event.preventDefault();
-        enter(focusRef.current);
+        preview(focusRef.current);
       } else if (event.code === "Escape") {
         onBack();
       } else if (event.code === "KeyN") {
@@ -301,9 +328,10 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
     if ((event.target as HTMLElement).closest("button, .roam-stick, .roam-card")) return;
     const rect = view.getBoundingClientRect();
     const at = screenToMap(event.clientX - rect.left, event.clientY - rect.top, cam);
-    const node = nearestNode(at, NEAR_RADIUS * 0.9);
+    const node = pinNear(at, 40 / cam.scale) ?? nearestNode(at, NEAR_RADIUS * 0.8);
     unlockAudio();
-    targetRef.current = node ? { at: standFor(node), node: node.id } : { at, node: null };
+    const path = findPath(posRef.current, node ? standFor(node) : at);
+    targetRef.current = path.length ? { path, node: node?.id ?? null } : null;
   }
 
   // Thumb stick for touch: drag from the pad, the knob shows the direction.
@@ -356,18 +384,21 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
         role="application"
         aria-label="Island map. Use arrow keys or WASD to walk, Enter to start the ward you are standing at, N to walk to the next ward."
       >
-        <div className="roam-world" ref={worldRef} style={{ width: MAP_W, height: MAP_H, ["--walker-lift" as string]: `${(skin.size ?? 3.1) + 0.6}rem` }}>
+        <div className="roam-world" ref={worldRef} style={{ width: MAP_W, height: MAP_H }}>
           <img className="roam-art" src="/map/island.jpg" alt="" draggable={false} />
           <svg className="roam-roads" viewBox={`0 0 ${MAP_W} ${MAP_H}`} aria-hidden>
             {SPURS.map(([a, b]) => {
-              const from = nodeById(a)!;
-              const to = nodeById(b)!;
               const open = !nodeState(save, b).locked && !nodeState(save, a).locked;
-              return <line key={`${a}-${b}`} className={open ? "spur open" : "spur"} x1={from.x} y1={from.y} x2={to.x} y2={to.y} />;
+              return <polyline key={`${a}-${b}`} className={open ? "spur open" : "spur"} points={roadBetween(a, b).map((p) => `${p.x},${p.y}`).join(" ")} />;
             })}
             <polyline className="road ahead" points={road.ahead.map((p) => `${p.x},${p.y}`).join(" ")} />
             <polyline className="road walked" points={road.walked.map((p) => `${p.x},${p.y}`).join(" ")} />
           </svg>
+          {WARD_NODES.map((node) => {
+            const spot = standFor(node);
+            const state = nodeState(save, node.id);
+            return <span key={`door-${node.id}`} className={`roam-door ${node.kind}${state.locked ? " locked" : ""}${node.id === focus ? " focus" : ""}`} style={{ left: spot.x, top: spot.y }} aria-hidden />;
+          })}
           {WARD_NODES.map((node) => {
             const state = nodeState(save, node.id);
             const classes = ["roam-pin", node.kind, state.locked ? "locked" : "", state.cleared ? "cleared" : "", node.id === nextId ? "next" : "", node.id === focus ? "focus" : ""].filter(Boolean).join(" ");
@@ -396,7 +427,9 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
           <div className="roam-walker" ref={walkerRef} data-face="right" style={{ ...aura, ["--walker-size" as string]: `${skin.size ?? 3.1}rem` }} aria-hidden>
             <span className="roam-shadow" />
             {skin.aura ? <span className="roam-aura" /> : null}
+            {skin.wings ? <span className="roam-wings" /> : null}
             <img ref={spriteRef} className="roam-sprite" src={skin.idle} alt="" draggable={false} />
+            {skin.halo ? <span className="roam-halo" /> : null}
           </div>
         </div>
 
@@ -440,6 +473,8 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
                   ? `Evolved for today${focusLevel.evolved.note ? `: ${focusLevel.evolved.note}` : ""}`
                   : best > 0
                     ? `Best ${best.toLocaleString()}`
+                    : focusState.cleared
+                      ? `Cleared${focusState.stars ? ` with ${focusState.stars} star${focusState.stars > 1 ? "s" : ""}` : ""}. Go again for more.`
                     : focusNode.kind === "boss"
                       ? "Nurse Karen is waiting."
                       : focusNode.id === nextId
@@ -452,7 +487,7 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
                   <Gift aria-hidden /> Gift
                 </button>
               ) : null}
-              <button type="button" className="btn" disabled={focusState.locked} onClick={() => enter(focusNode.id)}>
+              <button type="button" className="btn" disabled={focusState.locked} onClick={() => preview(focusNode.id)}>
                 {focusState.locked ? <><Lock aria-hidden /> Locked</> : <><Play aria-hidden /> {focusState.cleared ? "Replay" : "Start"}</>}
               </button>
             </div>
@@ -460,6 +495,19 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
         ) : null}
       </div>
       {opening != null && renderReveal ? renderReveal(opening, () => setOpening(null)) : null}
+      {sheet != null ? (
+        <LevelSheet
+          levelId={sheet}
+          save={save}
+          level={sheet === nextId ? nextLevel : undefined}
+          onClose={() => setSheet(null)}
+          onPlay={() => {
+            const id = sheet;
+            setSheet(null);
+            enter(id);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
