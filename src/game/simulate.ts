@@ -1,3 +1,4 @@
+import { createPerks, judgeMove, powersIn, type PerkState } from "./perks.ts";
 import {
   KINDS,
   cloneBoard,
@@ -86,6 +87,7 @@ interface SimState {
   cleanedThisMove: number;
   movesMade: number;
   feversTreated: number;
+  perks: PerkState;
 }
 
 function needs(state: SimState) {
@@ -199,6 +201,7 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
     cleanedThisMove: 0,
     movesMade: 0,
     feversTreated: 0,
+    perks: createPerks(),
   };
   let burned = false;
   let shuffles = 0;
@@ -230,12 +233,25 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
     state.moves -= 1;
     let plan = planAfterSwap(state.board, swap[0], swap[1], 1);
     let combo = 1;
+    let powers = 0;
+    const before = state.score;
     while (plan) {
+      powers += powersIn(state.board, plan);
       play(state, plan, mask);
       combo += 1;
       plan = planFromMatches(state.board, combo);
     }
     trackAssist(state, level.id, combo > 2);
+    // Combo perks, judged on the whole move, the same way the game does.
+    const perk = judgeMove(state.perks, { steps: combo - 1, powers, score: state.score - before }, state.board, state.rng, mask);
+    state.score += perk.bonus;
+    state.moves += perk.extraMoves;
+    plan = perk.plan;
+    while (plan) {
+      play(state, plan, mask);
+      combo += 1;
+      plan = planFromMatches(state.board, combo);
+    }
     state.movesMade += 1;
     // The game checks the goals before the ward gets its turn, so a winning move stands.
     if (goalsMet(level, progressOf(state))) break;

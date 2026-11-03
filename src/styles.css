@@ -3,6 +3,7 @@
 @import "./mechanics.css";
 @import "./ui.css";
 @import "./evolution.css";
+@import "./story.css";
 
 @theme {
   --color-pink: #fb3ba6;
