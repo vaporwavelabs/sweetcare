@@ -62,7 +62,7 @@ export function HomeScreen({ save, onNew, onContinue, onMap, onSettings, onRewar
           <Chip tone="gold" icon={<Star aria-hidden />} title="Stars earned">{stars}/{LEVELS.length * 3}</Chip>
           <Chip tone="gold" icon={<Coins aria-hidden />} title="Coins">{save.wallet.coins}</Chip>
         </div>
-        <button className="avatar-btn" type="button" onClick={onProfile} aria-label={`${career.name} profile`}>
+        <button className={`avatar-btn evo-ring evo-ring-s${save.evolution.stage}`} type="button" onClick={onProfile} aria-label={`${career.name} profile`}>
           <DocAvatar career={career} />
         </button>
       </div>

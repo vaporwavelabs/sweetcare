@@ -1,0 +1,612 @@
+/* Character evolution: avatar frame, cutscene, care points card, HUD challenge chip, profile track.
+   Stage colours come in as --aura-in / --aura-out from src/game/evolution.ts. */
+
+.evo {
+  position: relative;
+  display: block;
+  isolation: isolate;
+}
+
+.evo > .doc {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+}
+
+.evo-aura {
+  position: absolute;
+  inset: -14%;
+  z-index: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 55%, var(--aura-in) 0%, var(--aura-out) 68%);
+  animation: evo-breathe 2.6s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Ward Hero and up: a spinning candy ring around the glow. */
+.evo-s2 .evo-aura::after,
+.evo-s3 .evo-aura::after,
+.evo-s4 .evo-aura::after {
+  content: "";
+  position: absolute;
+  inset: 10%;
+  border-radius: 50%;
+  padding: 0.18rem;
+  background: conic-gradient(from 0deg, transparent 0 15%, var(--aura-in) 25%, transparent 40% 65%, var(--aura-in) 75%, transparent 90%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: evo-spin 6s linear infinite;
+}
+
+.evo-s4 .evo-aura {
+  background:
+    radial-gradient(circle at 50% 55%, rgba(255, 255, 255, 0.95) 0%, rgba(255, 210, 240, 0.6) 35%, rgba(170, 140, 255, 0) 70%);
+}
+
+.evo-s4 .evo-aura::after {
+  background: conic-gradient(#ff8fd0, #ffd25a, #8ff0b0, #8fc8ff, #c7a2ff, #ff8fd0);
+  opacity: 0.85;
+}
+
+.evo-halo {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: -5%;
+  width: 44%;
+  height: 11%;
+  transform: translateX(-50%);
+  border: 0.2rem solid #ffd25a;
+  border-radius: 50%;
+  box-shadow: 0 0 0.6rem #ffe58a, inset 0 0 0.35rem #fff3c0;
+  animation: evo-float 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+.evo-wings {
+  position: absolute;
+  inset: 4% -26% 22%;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.evo-wings i {
+  position: absolute;
+  top: 0;
+  width: 46%;
+  height: 78%;
+  background: linear-gradient(160deg, #ffe9f6 0%, #ff9fd6 45%, #b48cff 100%);
+  border: 2px solid rgba(255, 255, 255, 0.95);
+  box-shadow: inset 0 0 0.6rem rgba(255, 255, 255, 0.9), 0 0 0.8rem rgba(255, 110, 200, 0.75);
+  opacity: 0.95;
+}
+
+.evo-wings i:first-child {
+  left: 0;
+  border-radius: 90% 10% 60% 40%;
+  transform-origin: 100% 60%;
+  animation: evo-flap-l 1.8s ease-in-out infinite;
+}
+
+.evo-wings i:last-child {
+  right: 0;
+  border-radius: 10% 90% 40% 60%;
+  transform-origin: 0% 60%;
+  animation: evo-flap-r 1.8s ease-in-out infinite;
+}
+
+.evo-sparks {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.evo-sparks i {
+  position: absolute;
+  bottom: 10%;
+  width: 0.45rem;
+  height: 0.45rem;
+  background: var(--aura-in);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  animation: evo-spark 2.8s ease-out infinite;
+  opacity: 0;
+}
+
+.evo-sparks i:nth-child(1) { left: 8%; animation-delay: 0s; }
+.evo-sparks i:nth-child(2) { left: 82%; animation-delay: 0.7s; }
+.evo-sparks i:nth-child(3) { left: 24%; animation-delay: 1.4s; }
+.evo-sparks i:nth-child(4) { left: 66%; animation-delay: 2.1s; }
+
+.evo-badge {
+  position: absolute;
+  z-index: 4;
+  right: 0;
+  bottom: 2%;
+  display: grid;
+  place-items: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  border-radius: 999px;
+  border: 2px solid #fff;
+  background: linear-gradient(160deg, #ffe27a, #ffb52e);
+  color: #8a3d00;
+  font-size: 0.85rem;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 0.12rem 0 #c46a00;
+}
+
+.evo-s1 .evo-badge { background: linear-gradient(160deg, #ffc1e3, #ff5fb0); color: #fff; box-shadow: 0 0.12rem 0 #c0177a; }
+.evo-s2 .evo-badge { background: linear-gradient(160deg, #c4ffe0, #35c98a); color: #fff; box-shadow: 0 0.12rem 0 #1f8a5b; }
+.evo-s4 .evo-badge { background: conic-gradient(#ff8fd0, #ffd25a, #8ff0b0, #8fc8ff, #c7a2ff, #ff8fd0); color: #fff; }
+
+/* Sizes where the frame replaces a bare DocAvatar. */
+.evo.after-doc { width: 6.5rem; height: 6.5rem; margin: 0.6rem auto 0.2rem; }
+.evo.evo-profile { width: 6.2rem; height: 6.2rem; flex: none; margin: 0.3rem 0.9rem 0.3rem 0.6rem; }
+
+/* Header avatar buttons are round and clip, so the evolution shows as a ring. */
+.avatar-btn.evo-ring-s1 { box-shadow: 0 0.12rem 0 #e21880, 0 0 0 2px #ff9ed2, 0 0 0.6rem #ff8fd0; }
+.avatar-btn.evo-ring-s2 { box-shadow: 0 0.12rem 0 #e21880, 0 0 0 2px #8ff0b0, 0 0 0.7rem #5be0a0; }
+.avatar-btn.evo-ring-s3 { box-shadow: 0 0.12rem 0 #e21880, 0 0 0 2px #ffd25a, 0 0 0.8rem #ffc94a; }
+.avatar-btn.evo-ring-s4 {
+  border-color: #fff;
+  animation: evo-ring-shift 4s linear infinite;
+}
+
+/* ---------- Care points card (result screen) ---------- */
+
+.care-card {
+  margin: 0.35rem auto 0.45rem;
+  max-width: 17rem;
+  padding: 0.45rem 0.7rem 0.55rem;
+  border-radius: 0.9rem;
+  background: linear-gradient(160deg, rgba(143, 240, 176, 0.25), rgba(255, 143, 208, 0.18));
+  text-align: left;
+}
+
+.care-card ul {
+  list-style: none;
+  margin: 0.15rem 0 0;
+  padding: 0;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.care-card li {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.care-card li.challenge {
+  color: #1f7a4a;
+}
+
+.care-card li.challenge span::before {
+  content: "★ ";
+  color: #d98a00;
+}
+
+.modal .care-card p,
+.care-card p {
+  margin: 0.15rem 0 0;
+}
+
+.care-missed {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #9a4a78;
+}
+
+.care-mult {
+  font-size: 0.74rem;
+  font-weight: 900;
+  color: #c0177a;
+}
+
+.modal .care-card .care-total,
+.care-total {
+  text-align: right;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  color: #1f9d5b;
+}
+
+.evo-xp {
+  margin-top: 0.3rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.evo-xp-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.evo-xp-bar {
+  position: relative;
+  height: 0.55rem;
+  margin: 0.2rem 0 0.1rem;
+  border-radius: 999px;
+  background: rgba(106, 24, 72, 0.15);
+  overflow: hidden;
+}
+
+.evo-xp-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff5fb0, #ffd25a, #8ff0b0);
+  box-shadow: 0 0 0.4rem rgba(255, 210, 90, 0.8);
+}
+
+.evo-xp small {
+  color: #9a4a78;
+  font-weight: 700;
+}
+
+.care-banner {
+  margin: 0;
+  font-weight: 900;
+  color: var(--color-cream);
+  text-shadow: 0 0.08rem 0 #9d1058;
+}
+
+/* ---------- HUD challenge chip ---------- */
+
+.challenge-chip {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  align-self: center;
+  margin: 0 auto 0.15rem;
+  padding: 0.12rem 0.55rem 0.12rem 0.3rem;
+  min-height: 1.45rem;
+  border-radius: 999px;
+  background: rgba(255, 247, 251, 0.92);
+  color: var(--color-ink);
+  font-size: 0.72rem;
+  font-weight: 800;
+  box-shadow: 0 0.12rem 0 rgba(157, 16, 88, 0.45);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.challenge-chip i {
+  display: grid;
+  place-items: center;
+  width: 1.1rem;
+  height: 1.1rem;
+  border-radius: 999px;
+  background: #ffd25a;
+  color: #8a3d00;
+  font-style: normal;
+  font-size: 0.7rem;
+}
+
+.challenge-chip b {
+  color: #d98a00;
+}
+
+.challenge-chip.done {
+  background: #8ff0b0;
+  animation: evo-pop 0.4s cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+
+.challenge-chip.done i {
+  background: #1f9d5b;
+  color: #fff;
+}
+
+/* ---------- Evolution cutscene ---------- */
+
+.evo-cutscene {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 0.6rem;
+  padding: 1rem;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 40%, #7a1a5c 0%, #2c0623 75%);
+  color: var(--color-cream);
+  text-align: center;
+  animation: evo-fade-in 0.35s ease-out;
+}
+
+.evo-rays {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  width: 160vmax;
+  height: 160vmax;
+  transform: translate(-50%, -50%);
+  background: repeating-conic-gradient(from 0deg, rgba(255, 220, 240, 0.16) 0 6deg, transparent 6deg 18deg);
+  animation: evo-spin 18s linear infinite;
+  pointer-events: none;
+}
+
+.beat-charge .evo-rays { opacity: 0.4; }
+.beat-reveal .evo-rays { opacity: 1; }
+
+.evo-stage-wrap {
+  position: relative;
+  z-index: 1;
+}
+
+.evo.evo-hero {
+  width: min(11rem, 52vw);
+  height: min(11rem, 52vw);
+}
+
+.evo-hero .evo-aura {
+  inset: -30%;
+}
+
+.evo-hero .doc {
+  border-radius: 50%;
+  background: rgba(255, 247, 251, 0.9);
+  overflow: hidden;
+}
+
+.beat-charge .evo-hero .evo-aura {
+  inset: -30%;
+}
+
+.evo-hero .doc {
+  animation: evo-charge 1.5s ease-in forwards;
+}
+
+.beat-reveal .evo-hero {
+  animation: evo-pop 0.6s cubic-bezier(0.2, 1.5, 0.4, 1);
+}
+
+.evo-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.beat-burst .evo-flash {
+  animation: evo-flash 0.4s ease-out forwards;
+}
+
+.evo-reveal {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  gap: 0.35rem;
+  max-width: 20rem;
+  animation: evo-rise 0.5s ease-out;
+}
+
+.evo-reveal h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 2.1rem;
+  color: #ffd25a;
+  text-shadow: 0 0.14rem 0 #9d1058, 0 0 1rem rgba(255, 210, 90, 0.6);
+}
+
+.evo-reveal .kicker {
+  color: #ffb3dc;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.evo-look {
+  margin: 0;
+  font-weight: 700;
+}
+
+.evo-ability {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 247, 251, 0.95);
+  color: var(--color-ink);
+  font-size: 0.85rem;
+}
+
+.evo-ability b {
+  color: #c0177a;
+}
+
+.evo-reward {
+  margin: 0;
+  font-weight: 900;
+  color: #ffd25a;
+}
+
+.evo-hint {
+  position: relative;
+  z-index: 1;
+  margin: 0;
+  font-weight: 800;
+  opacity: 0.85;
+  animation: evo-breathe 1.2s ease-in-out infinite;
+}
+
+/* ---------- Profile track ---------- */
+
+.evo-track-card {
+  margin: 0.8rem 0 0.4rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-card);
+  background: #fff7fb;
+  color: var(--color-ink);
+  text-align: left;
+}
+
+.evo-track-hero {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+}
+
+.evo-track-hero h4 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+}
+
+.evo-track-hero p {
+  margin: 0.1rem 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.evo-stats {
+  color: #9a4a78;
+}
+
+.evo-track {
+  list-style: none;
+  margin: 0.55rem 0 0.3rem;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.evo-track li {
+  display: grid;
+  grid-template-columns: 2rem 1fr auto;
+  grid-template-areas: "pip title need" "pip text text";
+  column-gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border-radius: 0.8rem;
+  background: #ffe3f1;
+  font-size: 0.78rem;
+}
+
+.evo-track li.locked {
+  opacity: 0.55;
+}
+
+.evo-track li.now {
+  background: linear-gradient(90deg, #ffd6ee, #fff3c0);
+  box-shadow: 0 0 0 2px #ffd25a;
+}
+
+.evo-pip {
+  grid-area: pip;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, var(--aura-in), #ff8fd0);
+  color: #fff;
+  font-weight: 900;
+}
+
+.evo-track li:first-child .evo-pip {
+  background: #c9a3b9;
+}
+
+.evo-track b { grid-area: title; }
+.evo-track small { grid-area: need; font-weight: 800; color: #9a4a78; }
+.evo-track em { grid-area: text; font-style: normal; font-weight: 600; }
+
+/* ---------- Keyframes ---------- */
+
+@keyframes evo-breathe {
+  0%, 100% { transform: scale(0.94); opacity: 0.8; }
+  50% { transform: scale(1.04); opacity: 1; }
+}
+
+@keyframes evo-spin {
+  to { transform: translate(var(--tx, 0), var(--ty, 0)) rotate(360deg); }
+}
+
+.evo-rays { --tx: -50%; --ty: -50%; }
+
+@keyframes evo-float {
+  0%, 100% { transform: translate(-50%, 0); }
+  50% { transform: translate(-50%, -0.18rem); }
+}
+
+@keyframes evo-flap-l {
+  0%, 100% { transform: rotate(-8deg); }
+  50% { transform: rotate(10deg); }
+}
+
+@keyframes evo-flap-r {
+  0%, 100% { transform: rotate(8deg); }
+  50% { transform: rotate(-10deg); }
+}
+
+@keyframes evo-spark {
+  0% { transform: translateY(0) scale(0.4); opacity: 0; }
+  20% { opacity: 1; }
+  100% { transform: translateY(-260%) scale(1); opacity: 0; }
+}
+
+@keyframes evo-ring-shift {
+  0% { box-shadow: 0 0 0 2px #ff8fd0, 0 0 0.8rem #ff8fd0; }
+  25% { box-shadow: 0 0 0 2px #ffd25a, 0 0 0.8rem #ffd25a; }
+  50% { box-shadow: 0 0 0 2px #8ff0b0, 0 0 0.8rem #8ff0b0; }
+  75% { box-shadow: 0 0 0 2px #c7a2ff, 0 0 0.8rem #c7a2ff; }
+  100% { box-shadow: 0 0 0 2px #ff8fd0, 0 0 0.8rem #ff8fd0; }
+}
+
+@keyframes evo-pop {
+  0% { transform: scale(0.6); }
+  70% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+@keyframes evo-charge {
+  0% { transform: translateX(0); filter: brightness(1); }
+  20% { transform: translateX(-2px); }
+  40% { transform: translateX(3px); filter: brightness(1.4); }
+  60% { transform: translateX(-4px); filter: brightness(1.8) saturate(0.6); }
+  80% { transform: translateX(4px); filter: brightness(2.6) saturate(0.2); }
+  100% { transform: translateX(0) scale(1.06); filter: brightness(4) saturate(0); }
+}
+
+@keyframes evo-flash {
+  0% { opacity: 0; }
+  30% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes evo-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes evo-rise {
+  from { opacity: 0; transform: translateY(1rem); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evo-aura,
+  .evo-aura::after,
+  .evo-halo,
+  .evo-wings i,
+  .evo-sparks i,
+  .evo-rays,
+  .evo-hint,
+  .avatar-btn.evo-ring-s4,
+  .challenge-chip.done,
+  .evo-reveal,
+  .evo-cutscene,
+  .beat-reveal .evo-hero {
+    animation: none;
+  }
+
+  .evo-sparks {
+    display: none;
+  }
+}
