@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, ChevronLeft, Coins, Gift, Lock } from "lucide-react";
+import { Check, Coins, Gift, HelpCircle, Lock, Gamepad2, Save, Smartphone, Volume2 } from "lucide-react";
+import { ScreenHead } from "@/components/ui/Theme";
 import { haptic, hapticsSupported } from "@/game/haptics";
 import { HINT_DELAYS, type HapticStrength, type Prefs } from "@/game/prefs";
 import {
@@ -22,19 +23,25 @@ import { totalStars, type SaveData } from "@/game/save";
 import { dayKey } from "@/game/shifts";
 
 function Head({ title, onBack }: { title: string; onBack: () => void }) {
-  return (
-    <div className="map-head">
-      <button className="icon-btn" type="button" onClick={onBack} aria-label="Back"><ChevronLeft /></button>
-      <h2>{title}</h2>
-      <span />
-    </div>
-  );
+  return <ScreenHead title={title} onBack={onBack} />;
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+const SECTION_ICON = {
+  sound: Volume2,
+  haptics: Smartphone,
+  play: Gamepad2,
+  help: HelpCircle,
+  progress: Save,
+} as const;
+
+function Section({ title, icon, children }: { title: string; icon?: keyof typeof SECTION_ICON; children: ReactNode }) {
+  const Icon = icon ? SECTION_ICON[icon] : null;
   return (
     <section className="opt-card">
-      <h3>{title}</h3>
+      <h3>
+        {Icon ? <span className={`opt-icon ${icon}`} aria-hidden><Icon /></span> : null}
+        {title}
+      </h3>
       {children}
     </section>
   );
@@ -133,13 +140,13 @@ export function OptionsScreen({
     <div className="column help options">
       <Head title="Settings" onBack={onBack} />
       <div className="scroll">
-        <Section title="Sound">
+        <Section title="Sound" icon="sound">
           <Toggle label="Sound effects" on={save.sound} onChange={onSound} />
           <Slider label="Effects volume" value={prefs.sfxVolume} disabled={!save.sound} onChange={(n) => onPrefs({ sfxVolume: n })} />
           <Toggle label="Music" on={save.music} onChange={onMusic} />
           <Slider label="Music volume" value={prefs.musicVolume} disabled={!save.music} onChange={(n) => onPrefs({ musicVolume: n })} />
         </Section>
-        <Section title="Haptics">
+        <Section title="Haptics" icon="haptics">
           <Toggle
             label="Vibration"
             hint={canBuzz ? "Buzz on matches, powers, boss hits and wins." : "This device or browser does not support vibration."}
@@ -158,7 +165,7 @@ export function OptionsScreen({
             }}
           />
         </Section>
-        <Section title="Play">
+        <Section title="Play" icon="play">
           <Segments
             label="Hints"
             value={prefs.hintDelay}
@@ -173,10 +180,10 @@ export function OptionsScreen({
             onChange={() => onPrefs({ motion: prefs.motion === "reduced" ? "device" : "reduced" })}
           />
         </Section>
-        <Section title="Help">
+        <Section title="Help" icon="help">
           <button className="btn opt-btn" type="button" onClick={onHelp}>How to care</button>
         </Section>
-        <Section title="Progress">
+        <Section title="Progress" icon="progress">
           {confirm ? (
             <div className="opt-confirm">
               <p>Erase every star, coin, booster and rank? Your settings and nurse stay.</p>
@@ -189,6 +196,7 @@ export function OptionsScreen({
             <button className="btn opt-btn ghost" type="button" onClick={() => setConfirm(true)}>Reset progress</button>
           )}
         </Section>
+        <p className="opt-about">Sweet Care Crush · settings save on this device</p>
       </div>
     </div>
   );

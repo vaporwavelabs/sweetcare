@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "./level-creator.css";
 @import "./mechanics.css";
+@import "./ui.css";
 @import "./evolution.css";
 
 @theme {

@@ -1,6 +1,6 @@
 import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { ChevronLeft, Coins, Gift, Pause, Star, Volume2, VolumeX } from "lucide-react";
+import { ChevronLeft, Coins, Pause, Star, Volume2, VolumeX } from "lucide-react";
 import { Cheer, CountUp, DocAvatar, portrait, ProfileScreen, SketchModel } from "@/components/Profile";
 import { applyRound, ACHIEVEMENTS, rankTitle } from "@/game/profile";
 import { applyCare, challengeFor, challengeMet, stageRewards, wardPerks, type Challenge, type EvolveResult } from "@/game/evolution";
@@ -37,7 +37,6 @@ import {
   type Special,
 } from "@/game/engine";
 import {
-  HOSPITAL_KINDS,
   LEVELS,
   MAP_SPOTS,
   breakJelly,
@@ -98,13 +97,19 @@ import { evolveWardAhead, formOffset, isRolledWard, lockedWard, pushForm, wardFo
 import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, resetProgress, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
 import { dayKey, shiftForDate } from "@/game/shifts";
 import { applyMotionPref, motionReduced, type Prefs } from "@/game/prefs";
-import { grant, lossPayout, payWin, rewardsWaiting, spendFromBag, winPayout, type BoosterId, type Payout } from "@/game/rewards";
+import { grant, lossPayout, payWin, spendFromBag, winPayout, type BoosterId, type Payout } from "@/game/rewards";
 import { OptionsScreen, RewardsScreen } from "@/components/Options";
+import { HomeScreen } from "@/components/HomeScreen";
+import { LevelSheet } from "@/components/LevelSheet";
+import { MapTrail } from "@/components/MapTrail";
+import { levelKind } from "@/game/levelInfo";
 import { installErrorLog, note, readNotes, subscribeNotes, type Note } from "@/game/log";
 import { applyLayout } from "@/game/layout";
 import { LiquidBoard, type LiquidHandle } from "@/components/LiquidBoard";
 import { LevelCreator } from "@/components/LevelCreator";
 import { ParticleLayer, type ParticleHandle } from "@/components/ParticleLayer";
+import { Overworld } from "@/components/Overworld";
+import { readRoam, writeRoam } from "@/game/overworld";
 
 interface VTile {
   id: number;
@@ -353,6 +358,11 @@ export function SweetCare() {
   const curtainTimers = useRef<number[]>([]);
   const diskRef = useRef<SaveData>(defaultSave());
   const [screen, setScreen] = useState<Screen>("home");
+  const [mapView, setMapView] = useState<"roam" | "classic">(() => readRoam()?.view ?? "roam");
+  function pickMapView(view: "roam" | "classic") {
+    setMapView(view);
+    writeRoam({ view });
+  }
   const [caseFirst, setCaseFirst] = useState(false);
   const [save, setSave] = useState<SaveData>(defaultSave);
   const [tick, setTick] = useState(0);
@@ -1747,7 +1757,7 @@ export function SweetCare() {
       style={screen === "play" && model ? { ["--scene" as string]: `url(${model.level.bossHp ? "/scenes/boss.jpg" : model.level.encounter ? "/scenes/care.jpg" : `/scenes/${String(model.level.id).padStart(2, "0")}.jpg`})` } : undefined}
     >
       {screen === "home" ? (
-        <Home
+        <HomeScreen
           save={save}
           onNew={() => { sfxClick(); setScreen("cast"); }}
           onContinue={() => openLevel(continueLevel(save))}
@@ -1758,9 +1768,10 @@ export function SweetCare() {
           onCreator={() => { sfxClick(); setScreen("creator"); }}
           onSound={toggleSound}
           onProfile={openProfile}
-          notes={notes}
+          noteCount={notes.length}
           logOpen={logOpen}
           onToggleLog={() => setLogOpen((open) => !open)}
+          log={<LaunchLog notes={notes} />}
         />
       ) : null}
       {screen === "cast" ? (
@@ -1783,7 +1794,17 @@ export function SweetCare() {
           }}
         />
       ) : null}
-      {screen === "map" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} /> : null}
+      {screen === "map" && mapView === "roam" ? (
+        <Overworld
+          save={save}
+          onBack={() => setScreen("home")}
+          onPick={(id) => openLevel(id)}
+          onCollect={collectGift}
+          onClassic={() => pickMapView("classic")}
+          renderReveal={(id, close) => <CardReveal levelId={id} onClose={close} />}
+        />
+      ) : null}
+      {screen === "map" && mapView === "classic" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} onRoam={() => pickMapView("roam")} /> : null}
       {screen === "help" ? <Help onBack={() => setScreen("settings")} /> : null}
       {screen === "settings" ? (
         <OptionsScreen
@@ -1957,58 +1978,6 @@ function ShiftChip() {
   );
 }
 
-function Home({ save, onNew, onContinue, onMap, onSettings, onRewards, onDev, onCreator, onSound, onProfile, notes, logOpen, onToggleLog }: { save: SaveData; onNew: () => void; onContinue: () => void; onMap: () => void; onSettings: () => void; onRewards: () => void; onDev: () => void; onCreator: () => void; onSound: () => void; onProfile: () => void; notes: Note[]; logOpen: boolean; onToggleLog: () => void }) {
-  const played = save.unlocked > 1 || Object.values(save.stars).some((n) => n > 0);
-  const waiting = rewardsWaiting(save.wallet, totalStars(save), dayKey());
-  return (
-    <div className="column home">
-      <div className="crush-nav">
-        <button className="icon-btn" type="button" onClick={onSound} aria-label={save.sound ? "Mute sound" : "Sound on"}>
-          {save.sound ? <Volume2 /> : <VolumeX />}
-        </button>
-        <img className="header-title" src="/ui/crush-title.png" alt="Sweet Care Crush" />
-        <button className={`avatar-btn evo-ring evo-ring-s${save.evolution.stage}`} type="button" onClick={onProfile} aria-label={`${save.career.name} profile`}>
-          <DocAvatar career={save.career} />
-        </button>
-      </div>
-      <div className="scroll">
-        <p className="tagline">Match the sweets. Mend the ward.</p>
-        <ShiftChip />
-        <div className="home-purse">
-          <p className="star-total home-stars">
-            <Star className="star on" aria-hidden />
-            {totalStars(save)}/{LEVELS.length * 3}
-          </p>
-          <p className="star-total coin-total">
-            <Coins className="coin-icon" aria-hidden />
-            {save.wallet.coins}
-          </p>
-        </div>
-        <div className="hero-row" aria-hidden>
-          {HOSPITAL_KINDS.map((kind) => (
-            <img key={kind} src={`/sprites/${kind}.png`} alt="" />
-          ))}
-        </div>
-        <div className="stack">
-          <button className="btn" type="button" onClick={onNew}>New Game</button>
-          <button className="btn" type="button" onClick={onContinue} disabled={!played}>Continue</button>
-          <button className="btn secondary" type="button" onClick={onMap}>World map</button>
-          <button className={waiting ? "btn rewards-btn ready" : "btn secondary rewards-btn"} type="button" onClick={onRewards}>
-            <Gift aria-hidden />
-            Rewards
-            {waiting ? <span className="ready-dot" aria-label={`${waiting} ready`}>{waiting}</span> : null}
-          </button>
-          <button className="btn secondary" type="button" onClick={onCreator}>Level creator</button>
-          <button className="btn secondary" type="button" onClick={onSettings}>Settings</button>
-          <button className="btn secondary" type="button" onClick={onDev}>Dev</button>
-          <button className="btn secondary" type="button" onClick={onToggleLog}>Launch log{notes.length ? ` (${notes.length})` : ""}</button>
-        </div>
-        {logOpen ? <LaunchLog notes={notes} /> : null}
-      </div>
-    </div>
-  );
-}
-
 function DevMenu({
   onBack,
   onLevel,
@@ -2052,7 +2021,7 @@ function DevMenu({
   );
 }
 
-function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack: () => void; onPick: (id: number) => void; onCollect: (levelId: number) => void }) {
+function MapScreen({ save, onBack, onPick, onCollect, onRoam }: { save: SaveData; onBack: () => void; onPick: (id: number) => void; onCollect: (levelId: number) => void; onRoam?: () => void }) {
   const nextId = continueLevel(save);
   const preview = attemptFor(save, nextId);
   const rolled = nextId >= 3 && nextId <= 15 && !getLevel(nextId).bossHp;
@@ -2072,6 +2041,7 @@ function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack
   const spot = MAP_SPOTS.find((item) => item.id === nextId) ?? MAP_SPOTS[0]!;
   const [zoomed, setZoomed] = useState(true);
   const [opening, setOpening] = useState<number | null>(null);
+  const [previewId, setPreviewId] = useState<number | null>(null);
   const opened = save.openedGifts ?? [];
   const pendingGifts = MAP_SPOTS.filter((pin) => {
     const stars = save.stars[String(pin.id)] ?? 0;
@@ -2085,20 +2055,25 @@ function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack
         <h2>World map</h2>
         <span className="star-total"><Star className="star on" aria-hidden />{totalStars(save)}</span>
       </div>
-      <ShiftChip />
-      <button className="zoom-toggle" type="button" onClick={() => setZoomed((on) => !on)}>
-        {zoomed ? "Whole island" : "Zoom to next"}
-      </button>
-      <div className="island-wrap">
+      <div className="map-bar">
+        <ShiftChip />
+        <button className="zoom-toggle" type="button" onClick={() => setZoomed((on) => !on)}>
+          {zoomed ? "Whole island" : "Zoom to next"}
+        </button>
+        {onRoam ? <button className="zoom-toggle" type="button" onClick={onRoam}>Walk the island</button> : null}
+      </div>
+      <div className={zoomed ? "island-wrap zoomed" : "island-wrap"}>
         <IslandCamera focusX={spot.x} focusY={spot.y} zoom={zoomed}>
+          <MapTrail reached={Math.min(save.unlocked, 15)} />
           {MAP_SPOTS.map((pin) => {
             const bonus = pin.id >= 26;
             const side = pin.id >= 16 && !bonus;
             const locked = bonus ? false : !side && pin.id > save.unlocked;
             const stars = save.stars[String(pin.id)] ?? 0;
             const mark = pin.id === 16 ? "N" : pin.id === 17 ? "L" : pin.id === 18 ? "O" : String(pin.id);
+            const kind = levelKind(getLevel(pin.id));
             return (
-              <button key={pin.id} type="button" className={`pin${locked ? " locked" : ""}${pin.id === nextId ? " current" : ""}`} style={{ left: `${pin.x}%`, top: `${pin.y}%` }} disabled={locked} onClick={() => onPick(pin.id)} aria-label={side ? getLevel(pin.id).name : `Level ${pin.id}`}>
+              <button key={pin.id} type="button" className={`pin kind-${kind}${locked ? " locked" : ""}${stars > 0 ? " done" : ""}${pin.id === nextId ? " current" : ""}`} style={{ left: `${pin.x}%`, top: `${pin.y}%` }} disabled={locked} onClick={() => { sfxClick(); setPreviewId(pin.id); }} aria-label={side ? getLevel(pin.id).name : `Level ${pin.id}`}>
                 {mark}
                 <Stars n={locked ? 0 : stars} tiny />
               </button>
@@ -2138,13 +2113,27 @@ function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack
         </div>
       ) : null}
       {opening != null ? <CardReveal levelId={opening} onClose={() => setOpening(null)} /> : null}
+      {previewId != null ? (
+        <LevelSheet
+          levelId={previewId}
+          level={previewId === nextId ? next : undefined}
+          save={save}
+          onClose={() => setPreviewId(null)}
+          onPlay={() => {
+            const id = previewId;
+            setPreviewId(null);
+            onPick(id);
+          }}
+        />
+      ) : null}
       <div className="ward-row">
         {WARD_IDS.map((id) => {
           const open = wardsOpen(save.stars);
           const level = getLevel(id);
           return (
-            <button key={id} type="button" disabled={!open} onClick={() => onPick(id)}>
+            <button key={id} type="button" className={(save.stars[String(id)] ?? 0) > 0 ? "done" : undefined} disabled={!open} onClick={() => { sfxClick(); setPreviewId(id); }}>
               {level.name}
+              {(save.stars[String(id)] ?? 0) > 0 ? <Stars n={save.stars[String(id)] ?? 0} tiny /> : null}
             </button>
           );
         })}
@@ -2158,6 +2147,7 @@ function IslandCamera({ focusX, focusY, zoom, children }: { focusX: number; focu
   const frameRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<() => void>(() => {});
   const [xf, setXf] = useState("translate(0px, 0px) scale(1)");
+  const [camScale, setCamScale] = useState(1);
   useEffect(() => {
     const wrap = frameRef.current?.parentElement;
     const frame = frameRef.current;
@@ -2165,6 +2155,7 @@ function IslandCamera({ focusX, focusY, zoom, children }: { focusX: number; focu
     const apply = () => {
       if (!zoom) {
         setXf("translate(0px, 0px) scale(1)");
+        setCamScale(1);
         return;
       }
       const width = wrap.clientWidth;
@@ -2178,6 +2169,7 @@ function IslandCamera({ focusX, focusY, zoom, children }: { focusX: number; focu
       const tx = width / 2 - frame.offsetLeft - localX * scale;
       const ty = height / 2 - frame.offsetTop - localY * scale;
       setXf(`translate(${tx}px, ${ty}px) scale(${scale})`);
+      setCamScale(scale);
     };
     measureRef.current = apply;
     const timer = window.setTimeout(apply, 70);
@@ -2189,7 +2181,7 @@ function IslandCamera({ focusX, focusY, zoom, children }: { focusX: number; focu
     };
   }, [zoom, focusX, focusY]);
   return (
-    <div className="island-frame camera" ref={frameRef} style={{ transform: xf }}>
+    <div className="island-frame camera" ref={frameRef} style={{ transform: xf, ["--cam" as string]: camScale }}>
       <img className="island" src="/map/island.jpg" alt="" onLoad={() => measureRef.current()} />
       {children}
     </div>
