@@ -431,15 +431,15 @@
   animation-delay: calc(var(--i) * 0.1s);
 }
 
-.cutscene.fx-alarm .cut-fx {
+.cutscene.scene-fx-alarm .cut-fx {
   animation: alarmWash 0.6s ease-in-out 3;
 }
 
-.cutscene.fx-flash .cut-fx {
+.cutscene.scene-fx-flash .cut-fx {
   animation: flashWhite 0.5s ease-out both;
 }
 
-.cutscene.fx-flood .cut-fx::after {
+.cutscene.scene-fx-flood .cut-fx::after {
   content: "";
   position: absolute;
   left: -5%;

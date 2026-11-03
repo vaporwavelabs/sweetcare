@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ACTOR_NAMES, SCENES, lineFor, stageAt, type ActorId, type SceneId } from "@/game/cutscenes";
+import { ACTOR_NAMES, SCENES, lineFor, setAt, stageAt, type ActorId, type SceneId, type SetId } from "@/game/cutscenes";
 import { playSfx } from "@/game/sfx";
+import { setMusicScene } from "@/game/music";
 import { motionReduced } from "@/game/prefs";
 
 const ACTOR_SRC: Record<Exclude<ActorId, "you">, string> = {
@@ -36,8 +37,11 @@ export function Cutscene({ id, name, portraitSrc, onDone }: { id: SceneId; name:
     return current;
   }, [scene, index]);
 
+  const set = setAt(scene, index);
+
   // Each beat: its sound, then the typewriter.
   useEffect(() => {
+    if (beat.music) setMusicScene(beat.music);
     if (beat.sfx) playSfx(beat.sfx);
     if (beat.card) playSfx("cut.whoosh", { gain: 0.7 });
     if (still || !text) {
@@ -104,12 +108,12 @@ export function Cutscene({ id, name, portraitSrc, onDone }: { id: SceneId; name:
   };
 
   return (
-    <div className={`cutscene${leaving ? " leaving" : ""}${beat.fx ? ` fx-${beat.fx}` : ""}`} role="dialog" aria-modal="true" aria-label={scene.title} onClick={advance}>
-      <div className="cut-bg" style={{ backgroundImage: `url(${bg})` }} aria-hidden />
+    <div className={`cutscene${leaving ? " leaving" : ""}${beat.fx ? ` scene-fx-${beat.fx}` : ""}`} role="dialog" aria-modal="true" aria-label={scene.title} onClick={advance}>
+      {set ? <StorySet key={set} set={set} name={name} /> : <div className="cut-bg" style={{ backgroundImage: `url(${bg})` }} aria-hidden />}
       <div className="cut-vignette" aria-hidden />
       <div className="cut-bar top" aria-hidden />
       <div className="cut-bar bottom" aria-hidden />
-      {beat.fx ? <SceneFx key={`${index}-${beat.fx}`} fx={beat.fx} /> : null}
+      {beat.fx ? <SceneFx key={`${index}-${beat.fx}`} fx={beat.fx} stamp={beat.stamp} /> : null}
       <div className="cut-stage">
         {actorAt("left")}
         {actorAt("right")}
@@ -163,16 +167,120 @@ const BITS: Record<string, string[]> = {
   hearts: ["♥", "♥", "♥", "♥", "♥", "♥", "♥"],
   paper: ["", "", "", "", "", "", "", "", ""],
   spores: ["", "", "", "", "", "", "", "", "", ""],
+  caps: ["", "", "", "", "", "", "", ""],
+  confetti: Array.from({ length: 18 }, () => ""),
 };
 
-function SceneFx({ fx }: { fx: string }) {
+function SceneFx({ fx, stamp }: { fx: string; stamp?: string }) {
   const bits = BITS[fx];
   return (
     <div className={`cut-fx cut-fx-${fx}`} aria-hidden>
       {bits?.map((glyph, n) => (
         <span key={n} style={{ ["--i" as string]: String(n), ["--x" as string]: `${(n * 37 + 11) % 100}%` }}>{glyph}</span>
       ))}
-      {fx === "stamp" ? <b className="cut-stamp">APPROVED</b> : null}
+      {fx === "stamp" ? <b className="cut-stamp">{stamp ?? "APPROVED"}</b> : null}
+    </div>
+  );
+}
+
+/**
+ * Illustrated backdrops for the prologue, drawn with CSS so they match the kawaii theme without new art.
+ * Each set fills the screen behind the actors; styles are in src/prologue.css.
+ */
+function StorySet({ set, name }: { set: SetId; name: string }) {
+  const n = (count: number) => Array.from({ length: count }, (_, i) => i);
+  return (
+    <div className={`cut-set set-${set}`} aria-hidden>
+      {set === "campus" ? (
+        <>
+          <div className="s-sun" />
+          <div className="s-cloud c1" />
+          <div className="s-cloud c2" />
+          <div className="s-bunting">{n(11).map((i) => <span key={i} style={{ ["--i" as string]: String(i) }} />)}</div>
+          <div className="s-banner"><small>Sweet Care School of Nursing</small><b>Class of Care</b></div>
+          <div className="s-podium"><span>✚</span></div>
+          <div className="s-stage" />
+          <div className="s-crowd">{n(14).map((i) => <span key={i} style={{ ["--i" as string]: String(i), ["--y" as string]: String((i * 7) % 5) }} />)}</div>
+        </>
+      ) : null}
+      {set === "study" ? (
+        <>
+          <div className="s-window"><span className="s-moon" />{n(7).map((i) => <i key={i} style={{ ["--i" as string]: String(i) }} />)}</div>
+          <div className="s-clock"><span /></div>
+          <div className="s-glow" />
+          <div className="s-desk" />
+          <div className="s-books"><span>Med-Surg</span><span>Pharm</span><span>NCLEX review</span></div>
+          <div className="s-lamp" />
+          <div className="s-mug"><i /><i /><i /></div>
+          <div className="s-cards">{n(5).map((i) => <span key={i} style={{ ["--i" as string]: String(i), ["--y" as string]: String(((i * 3) % 4) * 1.8) }}>{["ABCs", "K+ 3.5-5", "SATA", "Prioritize", "Delegate"][i]}</span>)}</div>
+        </>
+      ) : null}
+      {set === "exam" || set === "exam-off" ? (
+        <>
+          <div className="s-wall" />
+          <div className="s-monitor">
+            <div className="s-screen">
+              {set === "exam" ? (
+                <>
+                  <small>NCLEX-RN</small>
+                  <b>Question <em /></b>
+                  <div className="s-choices"><span /><span /><span /><span /></div>
+                  <div className="s-meter"><span /></div>
+                </>
+              ) : (
+                <span className="s-off">. . .</span>
+              )}
+            </div>
+            <div className="s-standpost" />
+          </div>
+          <div className="s-table" />
+        </>
+      ) : null}
+      {set === "result" ? (
+        <>
+          <div className="s-rays" />
+          <div className="s-phone">
+            <div className="s-notch" />
+            <div className="s-note">
+              <small>NCLEX-RN · Result</small>
+              <b>PASS</b>
+              <span>Licensed: {name || "Nurse"}, RN</span>
+            </div>
+          </div>
+        </>
+      ) : null}
+      {set === "letter" ? (
+        <>
+          <div className="s-rays soft" />
+          <div className="s-envelope">
+            <div className="s-paper">
+              <small>Sweet Care Island Hospital</small>
+              <b>You're hired!</b>
+              <span>Dear {name || "Nurse"}, a ward is waiting for you.</span>
+            </div>
+            <div className="s-pocket" />
+            <div className="s-seal">♥</div>
+          </div>
+        </>
+      ) : null}
+      {set === "ferry" ? (
+        <>
+          <div className="s-sun dawn" />
+          <div className="s-isle" />
+          <div className="s-light" />
+          <div className="s-sea">{n(3).map((i) => <span key={i} style={{ ["--i" as string]: String(i) }} />)}</div>
+          <div className="s-boat"><span className="s-flag" /><span className="s-cabin" /><span className="s-hull" /></div>
+          <div className="s-gulls"><i /><i /><i /></div>
+        </>
+      ) : null}
+      {set === "island" ? (
+        <>
+          <img className="s-map" src="/map/island.jpg" alt="" draggable={false} />
+          <div className="s-cloud big l" />
+          <div className="s-cloud big r" />
+          <div className="s-pin"><span>1</span></div>
+        </>
+      ) : null}
     </div>
   );
 }
