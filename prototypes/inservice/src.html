@@ -1,0 +1,1076 @@
+<title>Sweet Care In-Service</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito:wght@600;700;800&display=swap">
+<style>
+/* Layout: one full-screen stage. Hub = scrolling card list; a training = WebGL canvas with a HUD over it.
+   Colors and type are the game's own sc-* theme (src/ui.css), so this reads as Sweet Care. Single pink look by design. */
+:root {
+  color-scheme: light;
+  --sc-bg-top: #ff6fbd; --sc-bg-bottom: #e81d84;
+  --sc-surface: #fff7fb; --sc-surface-2: #ffe3f1;
+  --sc-ink: #6a1848; --sc-ink-soft: #9a4a78;
+  --sc-accent: #e31278; --sc-gold: #ffd25a; --sc-gold-deep: #d98a00;
+  --sc-mint: #8ff0b0; --sc-mint-deep: #1f9d5b; --sc-danger: #ff335c; --sc-sky: #6cc6ff; --sc-white: #ffffff;
+  --sc-radius-lg: 1.4rem; --sc-radius-md: 1rem; --sc-radius-sm: .7rem;
+  --sc-shadow-press: 0 .32rem 0 var(--sc-accent);
+  --sc-shadow-float: 0 .8rem 1.6rem rgba(120,0,60,.28);
+  --sc-ease-pop: cubic-bezier(.2,1.5,.4,1); --sc-ease-out: cubic-bezier(.22,.82,.2,1);
+  --font-display: "Fredoka", "Baloo 2", "Arial Rounded MT Bold", system-ui, sans-serif;
+  --font-body: "Nunito", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+html, body { height: 100%; }
+body { background: linear-gradient(180deg, var(--sc-bg-top), var(--sc-bg-bottom)); background-color: var(--sc-bg-bottom); color: var(--sc-ink); font-family: var(--font-body); overflow: hidden; -webkit-tap-highlight-color: transparent; }
+button { font: inherit; color: inherit; border: 0; cursor: pointer; background: none; }
+button:focus-visible { outline: 3px solid var(--sc-gold); outline-offset: 2px; }
+#app { position: fixed; inset: 0; }
+#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+
+/* ---------- hub ---------- */
+#hub { position: absolute; inset: 0; overflow-y: auto; z-index: 5; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: calc(env(safe-area-inset-top, 0px) + 18px) calc(env(safe-area-inset-bottom, 0px) + 28px); }
+.hub-in { max-width: 980px; margin: 0 auto; display: grid; gap: 18px; }
+.hub-head { display: grid; grid-template-columns: auto 1fr; gap: 14px; align-items: center; color: var(--sc-white); }
+.hub-head img { width: 84px; height: 84px; border-radius: 50%; background: var(--sc-surface-2); border: 4px solid var(--sc-white); box-shadow: var(--sc-shadow-float); object-fit: cover; }
+.eyebrow { font-family: var(--font-display); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: .78rem; opacity: .9; }
+h1 { font-family: var(--font-display); font-weight: 700; font-size: clamp(1.9rem, 6vw, 2.8rem); line-height: 1; margin: 2px 0 6px; text-wrap: balance; text-shadow: 0 3px 0 rgba(160,0,80,.35); }
+.hub-head p { margin: 0; font-weight: 700; max-width: 56ch; line-height: 1.35; }
+.how { display: flex; flex-wrap: wrap; gap: 8px; }
+.sc-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: rgba(255,255,255,.22); color: var(--sc-white); font-weight: 800; font-size: .85rem; }
+.sc-chip.gold { background: var(--sc-gold); color: var(--sc-ink); }
+.sc-chip.mint { background: var(--sc-mint); color: #0d4f2c; }
+.sc-chip.light { background: var(--sc-surface); color: var(--sc-ink); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 270px), 1fr)); gap: 16px; }
+.card { background: var(--sc-surface); border-radius: var(--sc-radius-lg); box-shadow: var(--sc-shadow-float); overflow: hidden; display: grid; grid-template-rows: auto 1fr; text-align: left; transition: transform .25s var(--sc-ease-pop); }
+.card:hover { transform: translateY(-3px); }
+.card .art { position: relative; aspect-ratio: 16 / 9; max-width: 100%; display: grid; place-items: center; overflow: hidden; }
+.card .art img.main { height: 78%; filter: drop-shadow(0 8px 10px rgba(80,0,40,.3)); }
+.card .art img.side { position: absolute; height: 34%; filter: drop-shadow(0 4px 6px rgba(80,0,40,.25)); }
+.card .art .letters { position: absolute; left: 12px; bottom: 10px; display: flex; gap: 4px; }
+.card .art .letters b { font-family: var(--font-display); width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--sc-white); color: var(--sc-accent); font-size: .9rem; box-shadow: 0 2px 0 rgba(160,0,80,.25); }
+.card .body { padding: 14px 16px 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.card .ward { font-family: var(--font-display); font-weight: 600; font-size: .75rem; letter-spacing: .07em; text-transform: uppercase; color: var(--sc-accent); }
+.card h2 { font-family: var(--font-display); font-weight: 700; font-size: 1.35rem; margin: 0; line-height: 1.1; }
+.card p { margin: 0; color: var(--sc-ink-soft); font-weight: 700; font-size: .92rem; line-height: 1.35; }
+.card .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
+.stars { display: inline-flex; gap: 2px; color: #e9c4d6; font-size: 1.1rem; letter-spacing: 1px; }
+.stars .on { color: var(--sc-gold-deep); }
+.sc-cta { font-family: var(--font-display); font-weight: 700; font-size: 1.05rem; background: linear-gradient(180deg, #ffe17e, var(--sc-gold)); color: var(--sc-ink); border-radius: 999px; padding: 10px 22px; box-shadow: 0 .3rem 0 var(--sc-gold-deep); transition: transform .12s; }
+.sc-cta:active { transform: translateY(3px); box-shadow: 0 .1rem 0 var(--sc-gold-deep); }
+.sc-cta.big { font-size: 1.3rem; padding: 14px 28px; width: 100%; }
+.sc-btn2 { font-family: var(--font-display); font-weight: 600; background: var(--sc-surface-2); color: var(--sc-accent); border-radius: 999px; padding: 10px 18px; }
+.note { color: var(--sc-white); font-weight: 700; font-size: .85rem; opacity: .92; line-height: 1.4; max-width: 70ch; }
+.a1 { background: radial-gradient(circle at 50% 70%, #ffd0a8, #ffb1d4 60%, #ff8cc3); }
+.a2 { background: radial-gradient(circle at 50% 70%, #dff7ff, #b9e6ff 55%, #9fd2ff); }
+.a3 { background: radial-gradient(circle at 50% 70%, #ffe2ec, #ffc0d9 55%, #ff9fc7); }
+.a4 { background: radial-gradient(circle at 50% 70%, #eaffef, #c4f5d3 55%, #a6ecbf); }
+
+/* ---------- training HUD ---------- */
+#hud { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+#hud * { pointer-events: none; }
+#hud button, #hud .bins { pointer-events: auto; }
+.top { position: absolute; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top, 0px) + 10px) max(12px, env(safe-area-inset-right, 0px)) 0 max(12px, env(safe-area-inset-left, 0px)); display: grid; grid-template-columns: auto 1fr auto; gap: 10px; align-items: center; pointer-events: none; }
+.top > * { pointer-events: auto; }
+.back { width: 44px; height: 44px; border-radius: 50%; background: rgba(255,255,255,.88); color: var(--sc-accent); display: grid; place-items: center; box-shadow: 0 3px 0 rgba(160,0,80,.25); }
+.ttl { min-width: 0; text-align: center; }
+.ttl .eyebrow { color: var(--sc-accent); background: rgba(255,255,255,.85); display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: .68rem; }
+.ttl h3 { margin: 4px 0 0; font-family: var(--font-display); font-weight: 700; color: var(--sc-white); font-size: 1.15rem; text-shadow: 0 2px 0 rgba(160,0,80,.5), 0 0 12px rgba(160,0,80,.35); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.top .sc-chip { background: rgba(255,255,255,.9); color: var(--sc-ink); font-variant-numeric: tabular-nums; }
+.hudcol { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 64px); left: 0; right: 0; display: grid; justify-items: center; gap: 8px; pointer-events: none; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); }
+.steps { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.steps span { font-family: var(--font-display); font-weight: 700; font-size: .78rem; min-width: 30px; height: 30px; padding: 0 9px; border-radius: 999px; display: grid; place-items: center; background: rgba(255,255,255,.55); color: var(--sc-ink-soft); transition: all .3s var(--sc-ease-pop); white-space: nowrap; }
+.steps span.on { background: var(--sc-gold); color: var(--sc-ink); transform: scale(1.12); box-shadow: 0 3px 0 var(--sc-gold-deep); }
+.steps span.done { background: var(--sc-mint); color: #0d4f2c; }
+.meters { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.meters .meter { width: 128px; }
+.meter { background: rgba(255,255,255,.88); border-radius: 12px; padding: 5px 8px 7px; font-weight: 800; font-size: .7rem; color: var(--sc-ink); display: grid; gap: 4px; }
+.meter .lab { display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+.meter .bar { height: 7px; border-radius: 9px; background: var(--sc-surface-2); overflow: hidden; }
+.meter .bar i { display: block; height: 100%; width: 50%; border-radius: 9px; background: var(--sc-accent); transition: width .15s; }
+.coach { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); width: min(560px, calc(100% - 24px)); background: var(--sc-surface); border-radius: var(--sc-radius-lg); box-shadow: var(--sc-shadow-float); padding: 12px 14px; display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; pointer-events: none; }
+.coach .big { width: 52px; height: 52px; border-radius: 16px; background: linear-gradient(180deg, #ff5fb0, var(--sc-accent)); color: var(--sc-white); font-family: var(--font-display); font-weight: 700; font-size: 1.7rem; display: grid; place-items: center; box-shadow: 0 3px 0 #a10a55; }
+.coach .txt { min-width: 0; }
+.coach .txt b { display: block; font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; line-height: 1.1; }
+.coach .txt span { display: block; font-weight: 700; font-size: .88rem; color: var(--sc-ink-soft); line-height: 1.3; margin-top: 2px; }
+.coach .glyph { width: 52px; height: 52px; color: var(--sc-accent); }
+.coach .glyph svg { width: 100%; height: 100%; }
+.coach .act { pointer-events: auto; }
+.coach.pop { animation: pop .45s var(--sc-ease-pop); }
+@keyframes pop { from { transform: translateX(-50%) scale(.92); } to { transform: translateX(-50%) scale(1); } }
+.bins { position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom, 0px) + 110px); display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; width: min(560px, calc(100% - 24px)); }
+.bins button { font-family: var(--font-display); font-weight: 700; border-radius: 16px; padding: 10px 6px; color: var(--sc-white); font-size: .95rem; line-height: 1.05; box-shadow: 0 4px 0 rgba(0,0,0,.18); }
+.bins button small { display: block; font-family: var(--font-body); font-weight: 800; font-size: .66rem; opacity: .92; margin-top: 3px; }
+.bins .b0 { background: #f2b600; color: #5a3b00; } .bins .b1 { background: #ff335c; } .bins .b2 { background: #2fb36d; }
+.bins button:active { transform: translateY(3px); }
+#reticle { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px; pointer-events: none; border-radius: 50%; border: 3px solid var(--sc-white); box-shadow: 0 0 0 2px rgba(106,24,72,.35); transition: border-color .15s, transform .15s; }
+#reticle::after { content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: var(--sc-white); }
+#reticle.base { border-color: var(--sc-mint); transform: scale(1.12); }
+#reticle.base::after { background: var(--sc-mint); }
+#reticle.high { border-color: #ffb03b; }
+#reticle .lock { position: absolute; inset: -8px; }
+.hint { position: absolute; pointer-events: none; width: 76px; height: 76px; margin: -38px 0 0 -38px; border-radius: 50%; border: 3px dashed var(--sc-white); animation: spin 3s linear infinite; }
+.hint b { position: absolute; left: 50%; top: -30px; transform: translateX(-50%); white-space: nowrap; background: var(--sc-gold); color: var(--sc-ink); font-family: var(--font-display); font-size: .8rem; padding: 3px 9px; border-radius: 999px; animation: spin 3s linear infinite reverse; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast { position: absolute; left: 50%; top: 38%; transform: translate(-50%, -50%); pointer-events: none; font-family: var(--font-display); font-weight: 700; font-size: clamp(1.3rem, 5vw, 2rem); color: var(--sc-white); text-shadow: 0 3px 0 rgba(160,0,80,.55), 0 0 18px rgba(160,0,80,.4); white-space: nowrap; animation: toast 1s var(--sc-ease-out) forwards; }
+.toast.good { color: var(--sc-mint); } .toast.bad { color: #ffd2dc; } .toast.gold { color: var(--sc-gold); }
+.toast small { display: block; font-family: var(--font-body); font-size: .9rem; text-align: center; white-space: normal; max-width: 80vw; color: var(--sc-white); }
+@keyframes toast { 0% { opacity: 0; transform: translate(-50%, -30%) scale(.7); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); } 75% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -80%) scale(1); } }
+.tag3d { position: absolute; pointer-events: none; transform: translate(-50%, -100%); background: var(--sc-surface); color: var(--sc-ink); font-family: var(--font-display); font-weight: 700; font-size: .85rem; padding: 4px 10px; border-radius: 999px; box-shadow: 0 3px 0 rgba(160,0,80,.25); white-space: nowrap; }
+.beat { position: absolute; left: 50%; top: 44%; width: 120px; height: 120px; margin: -60px 0 0 -60px; pointer-events: none; display: grid; place-items: center; }
+.beat i { position: absolute; inset: 0; border-radius: 50%; border: 4px solid var(--sc-white); opacity: 0; }
+.beat i.go { animation: beat .55s ease-out; }
+@keyframes beat { from { transform: scale(.35); opacity: .95; } to { transform: scale(1.15); opacity: 0; } }
+.beat b { font-family: var(--font-display); font-weight: 700; font-size: 2.6rem; color: var(--sc-white); text-shadow: 0 3px 0 rgba(160,0,80,.55); font-variant-numeric: tabular-nums; }
+
+/* sheets */
+.veil { position: absolute; inset: 0; background: rgba(106,24,72,.35); display: grid; align-items: end; justify-items: center; z-index: 8; pointer-events: auto; padding-left: max(12px, env(safe-area-inset-left, 0px)); padding-right: max(12px, env(safe-area-inset-right, 0px)); padding-block: 12px calc(env(safe-area-inset-bottom, 0px) + 12px); }
+.sheet { width: min(540px, 100%); max-height: 100%; overflow-y: auto; background: var(--sc-surface); border-radius: var(--sc-radius-lg); box-shadow: var(--sc-shadow-float); padding: 18px 18px 16px; display: grid; gap: 12px; animation: up .45s var(--sc-ease-out); }
+@keyframes up { from { transform: translateY(40px); opacity: 0; } }
+.sheet h4 { margin: 0; font-family: var(--font-display); font-weight: 700; font-size: 1.5rem; line-height: 1.1; text-wrap: balance; }
+.sheet p { margin: 0; font-weight: 700; color: var(--sc-ink-soft); line-height: 1.4; }
+.sheet .who { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; }
+.sheet .who img { width: 64px; height: 64px; border-radius: 50%; background: var(--sc-surface-2); object-fit: cover; }
+.learn { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.learn li { background: var(--sc-surface-2); border-radius: var(--sc-radius-sm); padding: 9px 12px; font-weight: 700; font-size: .92rem; line-height: 1.35; }
+.learn li b { color: var(--sc-accent); font-family: var(--font-display); font-weight: 700; }
+.bigstars { display: flex; justify-content: center; gap: 10px; font-size: 3rem; line-height: 1; }
+.bigstars span { color: #ecd0de; transform: scale(.6); transition: transform .45s var(--sc-ease-pop), color .2s; }
+.bigstars span.on { color: var(--sc-gold); transform: scale(1); text-shadow: 0 3px 0 var(--sc-gold-deep); }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stats div { background: var(--sc-surface-2); border-radius: var(--sc-radius-sm); padding: 8px; text-align: center; font-weight: 800; font-size: .72rem; color: var(--sc-ink-soft); }
+.stats div b { display: block; font-family: var(--font-display); font-size: 1.25rem; color: var(--sc-ink); font-variant-numeric: tabular-nums; }
+.reward { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.sheet .acts { display: grid; grid-template-columns: 1fr 1.4fr; gap: 10px; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
+@media (max-width: 420px) { .meters .meter { width: 108px; } .steps span { font-size: .7rem; height: 26px; min-width: 26px; padding: 0 8px; } .coach .glyph { display: none; } .coach { grid-template-columns: auto 1fr; } }
+</style>
+
+<div id="app">
+  <canvas id="gl" aria-label="3D training scene"></canvas>
+
+  <section id="hub" aria-label="In-service training">
+    <div class="hub-in">
+      <header class="hub-head">
+        <img id="coachImg" alt="Your nurse">
+        <div>
+          <div class="eyebrow">Bonus shift · before each ward theme</div>
+          <h1>In-Service Training</h1>
+          <p>One minute of hands-on practice before a new ward opens. Learn a real skill, earn a Training badge and a head start on the next ward.</p>
+        </div>
+      </header>
+      <div class="how">
+        <span class="sc-chip gold">Prototype build · pick your favourites</span>
+        <span class="sc-chip">3D, first person</span>
+        <span class="sc-chip">Works with touch, mouse or keys</span>
+      </div>
+      <div class="grid" id="cards"></div>
+      <p class="note">These are playable prototypes, built outside the main game so you can try them before anything changes. The ward placements are a suggestion: one In-service per ward theme, unlocking on the island map just before that theme's first ward. Real-world steps follow common hospital training (P.A.S.S., WHO hand hygiene, hands-only CPR, sharps safety), simplified for play.</p>
+    </div>
+  </section>
+
+  <section id="hud" hidden>
+    <div class="top">
+      <button class="back" id="backBtn" aria-label="Back to In-service list"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+      <div class="ttl"><span class="eyebrow" id="hudEyebrow">In-service</span><h3 id="hudTitle">Training</h3></div>
+      <span class="sc-chip" id="hudTimer">0:00</span>
+    </div>
+    <div class="hudcol"><div class="steps" id="steps"></div><div class="meters" id="meters"></div></div>
+    <div id="reticle" hidden><svg class="lock" viewBox="0 0 62 62"><circle id="lockArc" cx="31" cy="31" r="28" fill="none" stroke="#8ff0b0" stroke-width="5" stroke-linecap="round" stroke-dasharray="176" stroke-dashoffset="176" transform="rotate(-90 31 31)"/></svg></div>
+    <div class="coach" id="coach"><div class="big" id="coachBig">P</div><div class="txt"><b id="coachTitle"></b><span id="coachText"></span></div><div class="glyph" id="coachGlyph"></div></div>
+    <div id="fx"></div>
+  </section>
+  <div id="sheets"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script>
+const ASSETS = __ASSETS__;
+(() => {
+"use strict";
+const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, k) => a + (b - a) * k;
+const rand = (a, b) => a + Math.random() * (b - a);
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("sc-inservice-" + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("sc-inservice-" + k, JSON.stringify(v)); } catch {} },
+};
+$("#coachImg").src = ASSETS.coach;
+
+/* ================= audio: tiny synth, matches the game's Web Audio bites ================= */
+const Sound = {
+  ctx: null, noiseBuf: null, spray: null,
+  ac() { if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { return null; } } if (this.ctx.state === "suspended") this.ctx.resume(); return this.ctx; },
+  tone(f, d = .12, type = "sine", v = .12, slide = 0, delay = 0) {
+    const c = this.ac(); if (!c) return; const t = c.currentTime + delay;
+    const o = c.createOscillator(), g = c.createGain(); o.type = type; o.frequency.setValueAtTime(f, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, f * slide), t + d);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + .01); g.gain.exponentialRampToValueAtTime(.0008, t + d);
+    o.connect(g).connect(c.destination); o.start(t); o.stop(t + d + .05);
+  },
+  pop() { this.tone(660, .1, "sine", .14, 1.8); },
+  good() { this.tone(784, .12, "triangle", .12); this.tone(1175, .18, "triangle", .1, 0, .08); },
+  bad() { this.tone(220, .22, "square", .06, .6); },
+  tick(hi) { this.tone(hi ? 1320 : 990, .05, "square", .035); },
+  win() { [523, 659, 784, 1047].forEach((f, i) => this.tone(f, .3, "triangle", .11, 0, i * .11)); },
+  thump() { this.tone(110, .14, "sine", .25, .5); },
+  noise() {
+    const c = this.ac(); if (!c) return null;
+    if (!this.noiseBuf) { const b = c.createBuffer(1, c.sampleRate, c.sampleRate); const d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; this.noiseBuf = b; }
+    return this.noiseBuf;
+  },
+  hiss(on, freq = 1800) {
+    const c = this.ac(); if (!c) return;
+    if (on && !this.spray) {
+      const s = c.createBufferSource(); s.buffer = this.noise(); s.loop = true;
+      const f = c.createBiquadFilter(); f.type = "bandpass"; f.frequency.value = freq; f.Q.value = .7;
+      const g = c.createGain(); g.gain.value = 0; g.gain.linearRampToValueAtTime(.16, c.currentTime + .08);
+      s.connect(f).connect(g).connect(c.destination); s.start(); this.spray = { s, g };
+    } else if (!on && this.spray) {
+      const { s, g } = this.spray; g.gain.cancelScheduledValues(c.currentTime); g.gain.setValueAtTime(g.gain.value, c.currentTime); g.gain.linearRampToValueAtTime(0, c.currentTime + .1); s.stop(c.currentTime + .12); this.spray = null;
+    }
+  },
+};
+const buzz = (p) => { try { navigator.vibrate && navigator.vibrate(p); } catch {} };
+
+/* ================= three.js shared kit ================= */
+const canvas = $("#gl");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const texCache = {};
+function tex(key) {
+  if (texCache[key]) return texCache[key];
+  const t = new THREE.TextureLoader().load(ASSETS[key]); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; texCache[key] = t; return t;
+}
+function canvasTex(w, h, draw, repeat) {
+  const c = document.createElement("canvas"); c.width = w; c.height = h; draw(c.getContext("2d"), w, h);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  if (repeat) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat[0], repeat[1]); }
+  return t;
+}
+const radial = (stops) => canvasTex(64, 64, (g) => { const r = g.createRadialGradient(32, 32, 0, 32, 32, 32); stops.forEach(([k, c]) => r.addColorStop(k, c)); g.fillStyle = r; g.fillRect(0, 0, 64, 64); });
+const SOFT = radial([[0, "rgba(255,255,255,1)"], [.45, "rgba(255,255,255,.85)"], [1, "rgba(255,255,255,0)"]]);
+const BUBBLE = canvasTex(64, 64, (g) => { g.fillStyle = "rgba(255,255,255,.55)"; g.beginPath(); g.arc(32, 32, 28, 0, 7); g.fill(); g.strokeStyle = "rgba(255,255,255,.95)"; g.lineWidth = 4; g.stroke(); g.fillStyle = "#fff"; g.beginPath(); g.arc(22, 22, 7, 0, 7); g.fill(); });
+const STAR = canvasTex(64, 64, (g) => { g.fillStyle = "#fff"; g.beginPath(); for (let i = 0; i < 10; i++) { const r = i % 2 ? 12 : 30, a = i * Math.PI / 5 - Math.PI / 2; g.lineTo(32 + Math.cos(a) * r, 32 + Math.sin(a) * r); } g.fill(); });
+
+function M(color, o = {}) { return new THREE.MeshPhysicalMaterial({ color, roughness: .38, clearcoat: .9, clearcoatRoughness: .22, ...o }); }
+function rbox(w, h, d, r = .05) {
+  r = Math.min(r, w / 2 - .002, h / 2 - .002, d / 2 - .002);
+  const iw = w - 2 * r, ih = h - 2 * r, cr = Math.min(iw, ih) * .18;
+  const s = new THREE.Shape();
+  s.moveTo(-iw / 2 + cr, -ih / 2); s.lineTo(iw / 2 - cr, -ih / 2); s.quadraticCurveTo(iw / 2, -ih / 2, iw / 2, -ih / 2 + cr);
+  s.lineTo(iw / 2, ih / 2 - cr); s.quadraticCurveTo(iw / 2, ih / 2, iw / 2 - cr, ih / 2); s.lineTo(-iw / 2 + cr, ih / 2);
+  s.quadraticCurveTo(-iw / 2, ih / 2, -iw / 2, ih / 2 - cr); s.lineTo(-iw / 2, -ih / 2 + cr); s.quadraticCurveTo(-iw / 2, -ih / 2, -iw / 2 + cr, -ih / 2);
+  const g = new THREE.ExtrudeGeometry(s, { depth: Math.max(.001, d - 2 * r), bevelEnabled: true, bevelThickness: r, bevelSize: r, bevelSegments: 4, curveSegments: 6 });
+  g.center(); g.computeVertexNormals(); return g;
+}
+function put(parent, m) { parent.add(m); return m; }
+function mesh(geo, mat, x = 0, y = 0, z = 0, shadow = true) { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = shadow; m.receiveShadow = true; return m; }
+function sprite(key, size, x = 0, y = 0, z = 0) { const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: typeof key === "string" ? tex(key) : key, transparent: true, depthWrite: false })); s.scale.set(size, size, 1); s.position.set(x, y, z); return s; }
+function label(text, { w = 512, h = 128, bg = "#fff7fb", fg = "#e31278", font = 64, radius = 40 } = {}) {
+  return canvasTex(w, h, (g) => {
+    g.fillStyle = bg; g.beginPath(); g.roundRect(4, 4, w - 8, h - 8, radius); g.fill();
+    g.fillStyle = fg; g.font = `700 ${font}px Fredoka, Arial Rounded MT Bold, sans-serif`; g.textAlign = "center"; g.textBaseline = "middle";
+    String(text).split("\n").forEach((line, i, all) => g.fillText(line, w / 2, h / 2 + (i - (all.length - 1) / 2) * font * 1.05 + 4));
+  });
+}
+const BLACK = M(0x2a1020, { roughness: .2, clearcoat: 1 });
+const WHITE = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const BLUSH = new THREE.MeshBasicMaterial({ color: 0xff7fb0, transparent: true, opacity: .7, depthWrite: false });
+/** Kawaii face facing +z, centred at (0,0,0) of the returned group. mood: happy | worried | sleep | wow */
+function face(s = 1, mood = "happy") {
+  const g = new THREE.Group(); g.userData.parts = {};
+  const eyes = [];
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Group(); eye.position.set(sx * .16 * s, .04 * s, 0);
+    const ball = mesh(new THREE.SphereGeometry(.07 * s, 18, 14), BLACK, 0, 0, 0, false); ball.scale.z = .5; eye.add(ball);
+    const hl = mesh(new THREE.SphereGeometry(.022 * s, 8, 6), WHITE, -.022 * s, .025 * s, .03 * s, false); eye.add(hl);
+    const lid = mesh(new THREE.TorusGeometry(.06 * s, .014 * s, 6, 16, Math.PI), BLACK, 0, -.01 * s, .01 * s, false); lid.visible = false; eye.add(lid);
+    eye.userData = { ball, hl, lid }; eyes.push(eye); g.add(eye);
+    const blush = new THREE.Mesh(new THREE.CircleGeometry(.055 * s, 20), BLUSH); blush.position.set(sx * .27 * s, -.06 * s, .005 * s); blush.scale.y = .6; g.add(blush);
+  }
+  const smile = mesh(new THREE.TorusGeometry(.055 * s, .015 * s, 6, 18, Math.PI), BLACK, 0, -.05 * s, .01 * s, false); smile.rotation.z = Math.PI; g.add(smile);
+  const mouthO = mesh(new THREE.SphereGeometry(.04 * s, 12, 10), M(0x8a1840), 0, -.08 * s, .005 * s, false); mouthO.scale.set(1, 1.2, .4); g.add(mouthO);
+  g.userData.parts = { eyes, smile, mouthO };
+  g.userData.setMood = (m) => {
+    const sleep = m === "sleep", worried = m === "worried", wow = m === "wow";
+    eyes.forEach((e) => { e.userData.ball.visible = !sleep; e.userData.hl.visible = !sleep; e.userData.lid.visible = sleep; e.userData.ball.scale.set(1, worried ? 1.25 : 1, .5); });
+    smile.visible = !worried && !wow; mouthO.visible = worried || wow; smile.rotation.z = sleep ? Math.PI : Math.PI;
+  };
+  g.userData.setMood(mood); return g;
+}
+/** Particle pool of sprites. */
+class Pool {
+  constructor(scene, map, n, additive = false) {
+    this.items = []; this.i = 0;
+    for (let k = 0; k < n; k++) {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map, transparent: true, depthWrite: false, fog: false, blending: additive ? THREE.AdditiveBlending : THREE.NormalBlending }));
+      s.visible = false; s.renderOrder = 5; scene.add(s);
+      this.items.push({ s, life: 0, max: 1, v: new THREE.Vector3(), s0: 1, s1: 1, c0: new THREE.Color(), c1: new THREE.Color(), g: 0, a: 1, rot: 0, onEnd: null });
+    }
+  }
+  spawn(p, v, { life = 1, s0 = .2, s1 = .5, c0 = 0xffffff, c1, g = 0, a = 1, onEnd = null } = {}) {
+    const it = this.items[this.i++ % this.items.length];
+    it.s.position.copy(p); it.v.copy(v); it.life = it.max = life; it.s0 = s0; it.s1 = s1; it.c0.set(c0); it.c1.set(c1 ?? c0); it.g = g; it.a = a; it.onEnd = onEnd; it.rot = rand(-2, 2); it.s.material.rotation = rand(0, 6); it.s.visible = true; return it;
+  }
+  update(dt) {
+    for (const it of this.items) {
+      if (it.life <= 0) continue;
+      it.life -= dt;
+      if (it.life <= 0) { it.s.visible = false; if (it.onEnd) it.onEnd(it.s.position); continue; }
+      const k = 1 - it.life / it.max; it.v.y += it.g * dt; it.s.position.addScaledVector(it.v, dt);
+      const sz = lerp(it.s0, it.s1, k); it.s.scale.set(sz, sz, 1); it.s.material.color.copy(it.c0).lerp(it.c1, k); it.s.material.opacity = it.a * (1 - k * k); it.s.material.rotation += it.rot * dt;
+    }
+  }
+}
+function confetti(pool, at, n = 40) {
+  const cols = [0xffd25a, 0xff5fb0, 0x8ff0b0, 0x6cc6ff, 0xffffff];
+  for (let i = 0; i < n; i++) pool.spawn(at, new THREE.Vector3(rand(-2, 2), rand(2, 4.5), rand(-1.5, 1.5)), { life: rand(1, 1.8), s0: .1, s1: .08, c0: cols[i % cols.length], g: -6 });
+}
+
+/** Pastel hospital room: checker floor, pink walls, mint wainscot, window, cross sign. */
+function room(scene, { w = 10, d = 10, h = 4.2, zBack = -5, wall = 0xffd6ea, tiles = ["#fff3f8", "#ffd0e4"], floorRep = 6 } = {}) {
+  const g = new THREE.Group();
+  const floorTex = canvasTex(128, 128, (c) => { c.fillStyle = tiles[0]; c.fillRect(0, 0, 128, 128); c.fillStyle = tiles[1]; c.fillRect(0, 0, 64, 64); c.fillRect(64, 64, 64, 64); }, [floorRep, floorRep]);
+  const floor = mesh(new THREE.PlaneGeometry(w, d), new THREE.MeshStandardMaterial({ map: floorTex, roughness: .55 }), 0, 0, zBack + d / 2, false);
+  floor.rotation.x = -Math.PI / 2; g.add(floor);
+  const wallMat = new THREE.MeshStandardMaterial({ color: wall, roughness: .9 });
+  const back = mesh(new THREE.PlaneGeometry(w, h), wallMat, 0, h / 2, zBack, false); g.add(back);
+  for (const sx of [-1, 1]) { const side = mesh(new THREE.PlaneGeometry(d, h), wallMat, sx * w / 2, h / 2, zBack + d / 2, false); side.rotation.y = -sx * Math.PI / 2; g.add(side); }
+  const mintMat = M(0xa9efc6, { clearcoat: .4 });
+  g.add(mesh(rbox(w, .9, .08, .03), mintMat, 0, .45, zBack + .04, false));
+  for (const sx of [-1, 1]) { const s = mesh(rbox(d, .9, .08, .03), mintMat, sx * (w / 2 - .04), .45, zBack + d / 2, false); s.rotation.y = Math.PI / 2; g.add(s); }
+  g.add(mesh(rbox(w, .12, .12, .04), M(0xffffff), 0, .96, zBack + .06, false));
+  const sky = canvasTex(128, 128, (c) => { const gr = c.createLinearGradient(0, 0, 0, 128); gr.addColorStop(0, "#8fd8ff"); gr.addColorStop(1, "#ffd4ec"); c.fillStyle = gr; c.fillRect(0, 0, 128, 128); c.fillStyle = "rgba(255,255,255,.95)"; [[30, 50, 14], [44, 46, 18], [60, 52, 12], [92, 84, 12], [104, 80, 16]].forEach(([x, y, r]) => { c.beginPath(); c.arc(x, y, r, 0, 7); c.fill(); }); });
+  return { g, wallMat, sky, floor };
+}
+function windowOn(parent, x, y, z, w = 1.6, h = 1.2, sky) {
+  const g = new THREE.Group(); g.position.set(x, y, z);
+  g.add(mesh(rbox(w + .2, h + .2, .12, .06), M(0xffffff), 0, 0, 0, false));
+  g.add(mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: sky }), 0, 0, .07, false));
+  g.add(mesh(rbox(.06, h, .05, .02), M(0xffffff), 0, 0, .09, false));
+  g.add(mesh(rbox(w, .06, .05, .02), M(0xffffff), 0, 0, .09, false));
+  parent.add(g); return g;
+}
+function crossSign(parent, x, y, z, s = .5) {
+  const g = new THREE.Group(); g.position.set(x, y, z); const red = M(0xff335c);
+  g.add(mesh(rbox(s, s * .34, .08, .04), red)); g.add(mesh(rbox(s * .34, s, .08, .04), red)); parent.add(g); return g;
+}
+function bed(parent, x, z, ry = 0) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry;
+  g.add(mesh(rbox(1.1, .3, 2.1, .08), M(0xffffff), 0, .55, 0));
+  g.add(mesh(rbox(1.08, .2, 2.0, .1), M(0x9fdcff), 0, .78, 0));
+  g.add(mesh(rbox(1.2, .9, .12, .06), M(0xff8cc3), 0, .75, -1.05));
+  g.add(mesh(rbox(1.2, .6, .12, .06), M(0xff8cc3), 0, .6, 1.05));
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(mesh(new THREE.CylinderGeometry(.04, .04, .45, 10), M(0xd8c3d0), sx * .45, .22, sz * .9));
+  const pillow = mesh(rbox(.7, .16, .38, .08), M(0xffffff), 0, .94, -.72); g.add(pillow);
+  const blanket = mesh(rbox(1.1, .1, 1.1, .05), M(0xffb3d6), 0, .9, .4); g.add(blanket);
+  const f = face(.5); f.position.set(0, .98, -.52); f.rotation.x = -.6; g.add(f);
+  parent.add(g); return g;
+}
+function ivStand(parent, x, z) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); const chrome = M(0xe9e2ea, { metalness: .6, roughness: .25 });
+  g.add(mesh(new THREE.CylinderGeometry(.03, .03, 2, 10), chrome, 0, 1, 0));
+  g.add(mesh(new THREE.CylinderGeometry(.3, .3, .05, 20), chrome, 0, .05, 0));
+  g.add(sprite("bottle", .55, 0, 1.75, .05)); parent.add(g); return g;
+}
+function cabinet(parent, x, z, ry = 0, color = 0xffffff) {
+  const g = new THREE.Group(); g.position.set(x, 0, z); g.rotation.y = ry;
+  g.add(mesh(rbox(.9, 1.1, .55, .06), M(color), 0, .55, 0));
+  for (const y of [.33, .78]) { g.add(mesh(rbox(.8, .4, .04, .03), M(0xffe3f1), 0, y, .28, false)); g.add(mesh(rbox(.22, .05, .05, .02), M(0xff8cc3), 0, y + .1, .31, false)); }
+  g.add(sprite("kit", .45, 0, 1.33, 0)); parent.add(g); return g;
+}
+function lights(scene, { key = [3, 6, 4], shadowSize = 8 } = {}) {
+  scene.add(new THREE.HemisphereLight(0xfff4fa, 0xffb0d0, 1.25));
+  const d = new THREE.DirectionalLight(0xfff1e6, 2.1); d.position.set(...key); d.castShadow = true;
+  d.shadow.mapSize.set(1024, 1024); d.shadow.camera.left = d.shadow.camera.bottom = -shadowSize; d.shadow.camera.right = d.shadow.camera.top = shadowSize; d.shadow.bias = -.0008; d.shadow.radius = 4;
+  scene.add(d); return d;
+}
+function makeHand(skin = 0xffd6c2, cuff = 0xff7fbf, side = 1) {
+  const g = new THREE.Group(); const sk = M(skin, { clearcoat: .35, roughness: .55, sheen: .4, sheenColor: new THREE.Color(0xffc0c0) });
+  const palm = mesh(rbox(.17, .19, .065, .03), sk, 0, 0, 0); g.add(palm);
+  const fingers = [];
+  [-.06, -.02, .02, .06].forEach((x, i) => { const len = [.075, .095, .09, .07][i]; const f = mesh(new THREE.CapsuleGeometry(.021, len, 4, 10), sk, x, .095 + len / 2, 0); g.add(f); fingers.push(f); });
+  const thumb = mesh(new THREE.CapsuleGeometry(.024, .07, 4, 10), sk, side * .095, .0, .015); thumb.rotation.z = side * -.85; g.add(thumb);
+  const c = mesh(new THREE.CylinderGeometry(.085, .09, .1, 18), M(cuff, { clearcoat: .3 }), 0, -.14, 0); g.add(c);
+  const arm = mesh(new THREE.CylinderGeometry(.09, .1, .6, 18), M(cuff, { clearcoat: .3 }), 0, -.48, 0); g.add(arm);
+  g.userData = { palm, fingers, thumb, arm }; return g;
+}
+
+/* ================= HUD helpers ================= */
+const hud = {
+  steps: [], meters: {},
+  setSteps(list) { const el = $("#steps"); el.innerHTML = ""; this.steps = list.map((t) => { const s = document.createElement("span"); s.textContent = t; el.appendChild(s); return s; }); },
+  step(i) { this.steps.forEach((s, k) => { s.className = k < i ? "done" : k === i ? "on" : ""; }); },
+  coach(big, title, text, glyph = "") {
+    $("#coachBig").textContent = big; $("#coachTitle").textContent = title; $("#coachText").innerHTML = text; $("#coachGlyph").innerHTML = GLYPHS[glyph] || glyph || "";
+    const c = $("#coach"); c.classList.remove("pop"); void c.offsetWidth; c.classList.add("pop");
+  },
+  meter(id, label, value, text, color) {
+    let m = this.meters[id];
+    if (!m) { m = document.createElement("div"); m.className = "meter"; m.innerHTML = `<div class="lab"><span></span><span></span></div><div class="bar"><i></i></div>`; $("#meters").appendChild(m); this.meters[id] = m; }
+    m.querySelector(".lab span").textContent = label; m.querySelector(".lab span:last-child").textContent = text ?? Math.round(value * 100) + "%";
+    const bar = m.querySelector("i"); bar.style.width = clamp(value, 0, 1) * 100 + "%"; if (color) bar.style.background = color;
+  },
+  toast(text, kind = "", sub = "") {
+    const t = document.createElement("div"); t.className = "toast " + kind; t.innerHTML = text + (sub ? `<small>${sub}</small>` : ""); $("#fx").appendChild(t); setTimeout(() => t.remove(), 1050);
+  },
+  clear() { $("#steps").innerHTML = ""; $("#meters").innerHTML = ""; $("#fx").innerHTML = ""; this.meters = {}; $("#reticle").hidden = true; document.querySelectorAll(".hud-extra").forEach((e) => e.remove()); },
+  extra(html, cls = "") { const d = document.createElement("div"); d.className = "hud-extra " + cls; d.innerHTML = html; $("#hud").appendChild(d); return d; },
+};
+const GLYPHS = {
+  circle: `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><path d="M38 24a14 14 0 1 1-6-11.5"/><path d="M33 6l-1 7 7 1"/></svg>`,
+  side: `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 24h36M13 17l-7 7 7 7M35 17l7 7-7 7"/></svg>`,
+  updown: `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M24 6v36M17 13l7-7 7 7M17 35l7 7 7-7"/></svg>`,
+  tap: `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><circle cx="24" cy="24" r="6" fill="currentColor"/><circle cx="24" cy="24" r="14" opacity=".5"/><circle cx="24" cy="24" r="21" opacity=".25"/></svg>`,
+  hold: `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><circle cx="24" cy="24" r="18"/><path d="M24 14v10l7 4"/></svg>`,
+  drag: `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M24 42V8M15 17l9-9 9 9"/></svg>`,
+  aim: `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round"><circle cx="24" cy="24" r="14"/><path d="M24 4v8M24 36v8M4 24h8M36 24h8"/></svg>`,
+  swipe: `<svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 18l-4 6 4 6M40 18l4 6-4 6M24 34v8M18 38l6 6 6-6"/><circle cx="24" cy="22" r="6" fill="currentColor"/></svg>`,
+};
+function fmtTime(s) { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); }
+function sheet(html) { const v = document.createElement("div"); v.className = "veil"; v.innerHTML = `<div class="sheet">${html}</div>`; $("#sheets").appendChild(v); return v; }
+function closeSheets() { $("#sheets").innerHTML = ""; }
+function project(v3, camera) { const p = v3.clone().project(camera); return { x: (p.x + 1) / 2 * innerWidth, y: (1 - p.y) / 2 * innerHeight, behind: p.z > 1 }; }
+
+/* ================= runtime ================= */
+let active = null, clock = new THREE.Clock(), elapsed = 0, timerOn = false;
+function fitCamera(cam, minHFov = 64, baseV = 55) {
+  const a = innerWidth / innerHeight; cam.aspect = a;
+  const v = Math.max(baseV, 2 * Math.atan(Math.tan(THREE.MathUtils.degToRad(minHFov) / 2) / a) * 180 / Math.PI);
+  cam.fov = Math.min(v, 92); cam.updateProjectionMatrix();
+}
+function resize() { renderer.setSize(innerWidth, innerHeight, false); if (active) fitCamera(active.camera, active.minHFov, active.baseV); }
+addEventListener("resize", resize);
+function ptr(e) { return { x: e.clientX, y: e.clientY, nx: e.clientX / innerWidth, ny: e.clientY / innerHeight }; }
+canvas.addEventListener("pointerdown", (e) => { if (!active || active.paused) return; canvas.setPointerCapture(e.pointerId); Sound.ac(); active.down && active.down(ptr(e)); });
+canvas.addEventListener("pointermove", (e) => { if (!active || active.paused) return; active.move && active.move(ptr(e), e.buttons > 0 || e.pointerType === "touch"); });
+canvas.addEventListener("pointerup", (e) => { if (!active || active.paused) return; active.up && active.up(ptr(e)); });
+canvas.addEventListener("pointercancel", (e) => { if (!active) return; active.up && active.up(ptr(e)); });
+addEventListener("keydown", (e) => { if (!active || active.paused || e.repeat) return; if (active.key && active.key(e.key, true)) e.preventDefault(); });
+addEventListener("keyup", (e) => { if (!active || active.paused) return; active.key && active.key(e.key, false); });
+function loop() {
+  requestAnimationFrame(loop);
+  if (!active) return;
+  const dt = Math.min(clock.getDelta(), 1 / 20);
+  if (!active.paused) { if (timerOn) { elapsed += dt; $("#hudTimer").textContent = fmtTime(elapsed); } active.update(dt, clock.elapsedTime); }
+  else active.idle && active.idle(dt, clock.elapsedTime);
+  renderer.render(active.scene, active.camera);
+}
+requestAnimationFrame(loop);
+
+function start(def) {
+  closeSheets(); hud.clear();
+  $("#hub").hidden = true; $("#hud").hidden = false;
+  $("#hudTitle").textContent = def.title; $("#hudEyebrow").textContent = "In-service · " + def.skill;
+  elapsed = 0; timerOn = false; $("#hudTimer").textContent = "0:00";
+  if (active && active.dispose) active.dispose();
+  active = def.build(); active.def = def; active.paused = true; resize(); clock.getDelta();
+  sheet(`<div class="who"><img src="${ASSETS.coach}" alt=""><div><div class="eyebrow" style="color:var(--sc-accent)">${def.ward}</div><h4>${def.title}</h4></div></div>
+    <p>${def.brief}</p><ul class="learn">${def.howto.map((h) => `<li>${h}</li>`).join("")}</ul>
+    <button class="sc-cta big" id="goBtn">Start training</button>`);
+  $("#goBtn").onclick = () => { closeSheets(); Sound.ac(); active.paused = false; timerOn = true; active.begin && active.begin(); };
+  $("#goBtn").focus();
+}
+function finish(res) {
+  timerOn = false; Sound.hiss(false);
+  const def = active.def; const best = store.get("best", {}); best[def.id] = Math.max(best[def.id] || 0, res.stars); store.set("best", best);
+  setTimeout(() => {
+    active.paused = true;
+    const v = sheet(`<div class="eyebrow" style="color:var(--sc-accent);text-align:center">${res.stars ? "Training complete" : "Training ended"}</div>
+      <h4 style="text-align:center">${res.title}</h4>
+      <div class="bigstars">${[0, 1, 2].map((i) => `<span data-i="${i}">★</span>`).join("")}</div>
+      <div class="stats">${res.stats.map(([k, v]) => `<div><b>${v}</b>${k}</div>`).join("")}</div>
+      ${res.note ? `<p>${res.note}</p>` : ""}
+      <ul class="learn">${def.learn.map((h) => `<li>${h}</li>`).join("")}</ul>
+      ${res.stars ? `<div class="reward"><span class="sc-chip gold">Training badge: ${def.badge}</span><span class="sc-chip mint">+${25 * res.stars} coins</span><span class="sc-chip light">${def.perk}</span></div>` : ""}
+      <div class="acts"><button class="sc-btn2" id="hubBtn">All trainings</button><button class="sc-cta" id="againBtn">Play again</button></div>`);
+    v.querySelectorAll(".bigstars span").forEach((s, i) => setTimeout(() => { if (i < res.stars) { s.classList.add("on"); Sound.tone(880 + i * 220, .15, "triangle", .1); } }, 350 + i * 280));
+    $("#hubBtn").onclick = toHub; $("#againBtn").onclick = () => start(def);
+  }, res.delay ?? 900);
+}
+function toHub() {
+  closeSheets(); hud.clear(); Sound.hiss(false); timerOn = false;
+  if (active && active.dispose) active.dispose(); active = null;
+  $("#hud").hidden = true; $("#hub").hidden = false; renderer.clear(); renderCards();
+}
+$("#backBtn").onclick = toHub;
+
+/* =====================================================================
+   1. FIRE SAFETY: P.A.S.S. (first person extinguisher)
+   ===================================================================== */
+function buildFire() {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xffd6ea); scene.fog = new THREE.Fog(0xffd6ea, 9, 20);
+  const camera = new THREE.PerspectiveCamera(60, 1, .03, 50); camera.position.set(0, 1.6, 1.3); camera.rotation.order = "YXZ"; scene.add(camera);
+  lights(scene, { key: [2.5, 6, 3] });
+  const R = room(scene, { w: 9, d: 9, zBack: -5 }); scene.add(R.g);
+  windowOn(scene, -2.2, 2.3, -4.93, 1.8, 1.2, R.sky);
+  crossSign(scene, 2.2, 2.9, -4.93, .55);
+  const poster = mesh(new THREE.PlaneGeometry(1.5, 1.0), new THREE.MeshBasicMaterial({ map: label("P.A.S.S.\nPull · Aim\nSqueeze · Sweep", { w: 512, h: 340, font: 62, fg: "#e31278" }) }), .4, 2.15, -4.93, false); scene.add(poster);
+  const exit = mesh(rbox(.7, .28, .06, .03), new THREE.MeshBasicMaterial({ map: label("EXIT", { w: 256, h: 100, bg: "#1f9d5b", fg: "#ffffff", font: 64, radius: 24 }) }), 4.45, 2.75, -.8, false); exit.rotation.y = -Math.PI / 2; scene.add(exit);
+  const door = mesh(rbox(1.2, 2.3, .1, .05), M(0xffffff), 4.45, 1.15, -.8); door.rotation.y = -Math.PI / 2; scene.add(door);
+  bed(scene, -2.6, -2.9, .15); ivStand(scene, -1.6, -3.9); cabinet(scene, 2.9, -4.4, 0); cabinet(scene, 3.9, -4.4, 0, 0xffe3f1);
+
+  // the bin that's on fire
+  const binG = new THREE.Group(); binG.position.set(0, 0, -2.2); scene.add(binG);
+  binG.add(mesh(new THREE.CylinderGeometry(.42, .34, .8, 36), M(0x9fd8ff), 0, .4, 0));
+  put(binG, mesh(new THREE.TorusGeometry(.42, .04, 10, 36), M(0x6fb9f0), 0, .8, 0)).rotation.x = Math.PI / 2;
+  const binFace = face(.9, "worried"); binFace.position.set(0, .42, .385); binG.add(binFace);
+  const scorch = mesh(new THREE.CircleGeometry(1.1, 32), new THREE.MeshBasicMaterial({ color: 0x5a2a3a, transparent: true, opacity: .18, depthWrite: false }), 0, .005, 0, false); scorch.rotation.x = -Math.PI / 2; binG.add(scorch);
+  // the flame character: a drawn flame sprite with a face, plus particles
+  const flameTex = canvasTex(256, 320, (g) => {
+    const gr = g.createLinearGradient(0, 40, 0, 320); gr.addColorStop(0, "#ffe680"); gr.addColorStop(.55, "#ff9a3c"); gr.addColorStop(1, "#ff4f6d");
+    g.fillStyle = gr; g.beginPath(); g.moveTo(128, 8); g.bezierCurveTo(170, 80, 250, 130, 236, 220); g.bezierCurveTo(226, 290, 170, 316, 128, 316); g.bezierCurveTo(86, 316, 30, 290, 20, 220); g.bezierCurveTo(10, 150, 70, 120, 92, 60); g.bezierCurveTo(104, 100, 118, 110, 128, 8); g.fill();
+    g.fillStyle = "#fff3b0"; g.beginPath(); g.ellipse(128, 240, 70, 62, 0, 0, 7); g.fill();
+    g.fillStyle = "#3a1020"; for (const x of [98, 158]) { g.beginPath(); g.ellipse(x, 228, 13, 17, 0, 0, 7); g.fill(); } g.fillStyle = "#fff"; for (const x of [93, 153]) { g.beginPath(); g.arc(x, 222, 5, 0, 7); g.fill(); }
+    g.strokeStyle = "#3a1020"; g.lineWidth = 7; g.lineCap = "round"; g.beginPath(); g.moveTo(80, 200); g.lineTo(112, 210); g.moveTo(176, 200); g.lineTo(144, 210); g.stroke();
+    g.beginPath(); g.arc(128, 262, 14, Math.PI * 1.1, Math.PI * 1.9, false); g.stroke();
+  });
+  const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTex, transparent: true, depthWrite: false, fog: false })); flame.center.set(.5, 0); flame.position.set(0, .66, -2.15); scene.add(flame);
+  const fireLight = new THREE.PointLight(0xff8a3c, 6, 7, 1.6); fireLight.position.set(0, 1.4, -1.9); scene.add(fireLight);
+  const flames = new Pool(scene, radial([[0, "rgba(255,255,220,1)"], [.35, "rgba(255,190,80,.9)"], [1, "rgba(255,80,60,0)"]]), 90, true);
+  const smoke = new Pool(scene, SOFT, 40);
+  const foam = new Pool(scene, SOFT, 160);
+  const sparkle = new Pool(scene, STAR, 60, true);
+
+  // extinguisher held in first person (child of the camera)
+  const ex = new THREE.Group(); ex.position.set(.36, -.46, -.95); ex.rotation.set(-.12, -.25, .08); camera.add(ex);
+  const red = M(0xff2d4f, { clearcoat: 1, clearcoatRoughness: .1 }), steel = M(0xd9d4dc, { metalness: .7, roughness: .25 }), dark = M(0x3a2030);
+  ex.add(mesh(new THREE.CylinderGeometry(.12, .12, .52, 32), red, 0, 0, 0, false));
+  ex.add(mesh(new THREE.SphereGeometry(.12, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), red, 0, .26, 0, false));
+  const band = mesh(new THREE.CylinderGeometry(.123, .123, .17, 32, 1, true), new THREE.MeshStandardMaterial({ map: label("ABC", { w: 512, h: 128, font: 70, bg: "#ffffff", fg: "#e31278", radius: 0 }), roughness: .5 }), 0, -.02, 0, false); band.rotation.y = Math.PI * 1.15; ex.add(band);
+  ex.add(mesh(new THREE.CylinderGeometry(.045, .05, .1, 16), steel, 0, .41, 0, false));
+  const lever = new THREE.Group(); lever.position.set(-.02, .47, 0); ex.add(lever);
+  lever.add(mesh(rbox(.24, .03, .06, .012), steel, .1, 0, 0, false));
+  ex.add(mesh(rbox(.24, .03, .06, .012), steel, .08, .42, 0, false));
+  const pin = new THREE.Group(); pin.position.set(-.075, .45, .02); ex.add(pin);
+  pin.add(mesh(new THREE.TorusGeometry(.038, .009, 8, 24), M(0xffd25a, { metalness: .4 }), 0, 0, 0, false));
+  put(pin, mesh(new THREE.CylinderGeometry(.006, .006, .09, 6), steel, .045, 0, 0, false)).rotation.z = Math.PI / 2;
+  const seal = mesh(new THREE.SphereGeometry(.012, 8, 6), M(0x2fb36d), -.04, .435, .03, false); ex.add(seal);
+  const nozzle = new THREE.Group(); nozzle.position.set(-.26, .2, -.3); ex.add(nozzle);
+  put(nozzle, mesh(new THREE.CylinderGeometry(.018, .035, .14, 14), dark, 0, 0, -.07, false)).rotation.x = Math.PI / 2;
+  const hoseCurve = new THREE.CatmullRomCurve3([new THREE.Vector3(.02, .4, 0), new THREE.Vector3(-.1, .5, -.05), new THREE.Vector3(-.3, .38, -.15), new THREE.Vector3(-.26, .2, -.3)]);
+  ex.add(mesh(new THREE.TubeGeometry(hoseCurve, 24, .02, 8), dark, 0, 0, 0, false));
+
+  const S = { step: 0, fire: 1, charge: 1, aimYaw: 0, aimPitch: -.2, tYaw: 0, tPitch: -.2, spraying: false, hold: false, sprayT: 0, baseT: 0, lock: 0, grab: null, pinOff: 0, pinGone: false, hit: new THREE.Vector3(), lastX: 0, sweep: 0, zone: "off", toastCd: 0, done: false, wins: 0, nozzleW: new THREE.Vector3() };
+  hud.setSteps(["Pull", "Aim", "Squeeze", "Sweep"]);
+  hud.meter("fire", "Fire", 1, "100%", "#ff7a2f"); hud.meter("agent", "Extinguisher", 1, "100%", "#6cc6ff");
+  const pinHint = hud.extra(`<b>Drag up</b>`, "hint");
+  const reticle = $("#reticle"), lockArc = $("#lockArc");
+  function setStep(i) {
+    S.step = i; hud.step(i);
+    if (i === 0) hud.coach("P", "Pull the pin", "Grab the yellow ring on the handle and drag it up. It breaks the tamper seal.", "drag");
+    if (i === 1) { hud.coach("A", "Aim low", "Point the nozzle at the <b>base</b> of the fire, not the flames. Hold it there.", "aim"); reticle.hidden = false; pinHint.remove(); }
+    if (i === 2) hud.coach("S", "Squeeze", "Press and hold anywhere (or Space) to squeeze the handle.", "hold");
+    if (i === 3) hud.coach("S", "Sweep", "Keep squeezing and sweep side to side across the base until it's out.", "side");
+  }
+  function aimFrom(p) { S.tYaw = -(p.nx - .5) * .8; S.tPitch = -.18 - (p.ny - .5) * .8; }
+  const P = {
+    scene, camera, minHFov: 66, baseV: 58,
+    begin() { setStep(0); },
+    down(p) {
+      if (S.done) return;
+      if (S.step === 0) { const sp = project(pin.getWorldPosition(new THREE.Vector3()), camera); if (Math.hypot(p.x - sp.x, p.y - sp.y) < 90) S.grab = { y: p.y }; else hud.toast("Grab the pin", "", "The yellow ring by the handle"); return; }
+      aimFrom(p); S.hold = true;
+      if (S.step === 1) { hud.toast("Aim first", "", "Get the circle green on the base, then squeeze"); }
+    },
+    move(p, pressed) {
+      if (S.step === 0 && S.grab) { S.pinOff = clamp((S.grab.y - p.y) / 380, 0, .16); if (S.grab.y - p.y > 70) pullPin(); return; }
+      if (S.step >= 1 && (pressed || true)) aimFrom(p);
+    },
+    up() { S.grab = null; S.hold = false; if (S.step === 0) S.pinOff = 0; },
+    key(k, down) {
+      if (k === " " || k === "Enter") { if (S.step === 0 && down) { pullPin(); return true; } if (S.step >= 1) { S.hold = down; return true; } }
+      const d = .06; if (down && S.step >= 1) { if (k === "ArrowLeft") S.tYaw += d * 2; if (k === "ArrowRight") S.tYaw -= d * 2; if (k === "ArrowUp") S.tPitch += d; if (k === "ArrowDown") S.tPitch -= d; }
+      return k.startsWith("Arrow");
+    },
+    update(dt, t) {
+      // camera aim
+      S.aimYaw = lerp(S.aimYaw, S.tYaw, 1 - Math.exp(-dt * 10)); S.aimPitch = lerp(S.aimPitch, S.tPitch, 1 - Math.exp(-dt * 10));
+      camera.rotation.set(S.aimPitch, S.aimYaw, 0); camera.position.y = 1.6 + Math.sin(t * 1.6) * .006;
+      camera.updateMatrixWorld();
+      const dir = camera.getWorldDirection(new THREE.Vector3()); const k = (-2.15 - camera.position.z) / dir.z; S.hit.copy(camera.position).addScaledVector(dir, k);
+      const dx = Math.abs(S.hit.x), h = S.fire;
+      const baseTop = 1.15;
+      S.zone = dx < .62 && S.hit.y > .45 && S.hit.y < baseTop ? "base" : dx < .75 && S.hit.y >= baseTop && S.hit.y < 1.2 + 1.6 * Math.max(h, .3) ? "high" : "off";
+      reticle.className = S.step >= 1 ? (S.zone === "base" ? "base" : S.zone === "high" ? "high" : "") : "";
+      const sw = Math.abs(S.hit.x - S.lastX) / Math.max(dt, 1e-3); S.lastX = S.hit.x; S.sweep = lerp(S.sweep, sw, 1 - Math.exp(-dt * 6));
+      // pin
+      if (!S.pinGone) { pin.position.y = .45 + S.pinOff; const sp = project(pin.getWorldPosition(new THREE.Vector3()), camera); pinHint.style.left = sp.x + "px"; pinHint.style.top = sp.y + "px"; }
+      else if (pin.visible) { pin.position.x -= dt * .5; pin.position.y += dt * (1.2 - (t - S.pinT) * 6); pin.rotation.z += dt * 10; if (t - S.pinT > .7) pin.visible = false; }
+      // aim lock
+      if (S.step === 1) {
+        S.lock = S.zone === "base" ? S.lock + dt : Math.max(0, S.lock - dt * 2);
+        lockArc.setAttribute("stroke-dashoffset", 176 * (1 - clamp(S.lock / .7, 0, 1)));
+        if (S.lock > .7) { Sound.good(); buzz(20); lockArc.setAttribute("stroke-dashoffset", 176); setStep(2); }
+      }
+      // spray
+      const spraying = S.step >= 2 && S.hold && S.charge > 0 && !S.done;
+      if (spraying !== S.spraying) { S.spraying = spraying; Sound.hiss(spraying, 2200); }
+      lever.rotation.z = lerp(lever.rotation.z, spraying ? -.28 : 0, 1 - Math.exp(-dt * 20));
+      nozzle.lookAt(S.hit); ex.position.x = .36 + (spraying ? Math.sin(t * 50) * .002 : 0);
+      if (spraying) {
+        S.charge = Math.max(0, S.charge - dt * .07); S.sprayT += dt; if (S.zone === "base") S.baseT += dt;
+        nozzle.getWorldPosition(S.nozzleW);
+        for (let i = 0; i < 4; i++) {
+          const tgt = S.hit.clone().add(new THREE.Vector3(rand(-.12, .12), rand(-.08, .12), 0)); const v = tgt.sub(S.nozzleW); const dist = v.length(); v.normalize().multiplyScalar(7.5);
+          foam.spawn(S.nozzleW.clone().addScaledVector(v, .01), v, { life: dist / 7.5, s0: .04, s1: .28, c0: 0xffffff, c1: 0xe8f6ff, a: .9, onEnd: (pos) => foam.spawn(pos, new THREE.Vector3(rand(-.6, .6), rand(-.2, .5), rand(.1, .5)), { life: .9, s0: .25, s1: .55, c0: 0xffffff, a: .8, g: -1.2 }) });
+        }
+        if (S.step === 2 && S.sprayT > .45) setStep(3);
+        if (S.zone === "base") { const eff = .03 + .26 * clamp(S.sweep / 1.4, 0, 1); S.fire = Math.max(0, S.fire - eff * dt); if (S.sweep < .35 && S.step === 3) maybeToast("Sweep!", "", "Move side to side across the base"); }
+        else if (S.zone === "high") { S.fire = Math.max(0, S.fire - .006 * dt); maybeToast("Too high", "bad", "Spraying the flames does little. Aim at the base."); }
+        else maybeToast("Missed", "bad", "Bring the circle back onto the fire");
+      } else if (S.fire > 0 && S.fire < 1 && !S.done) S.fire = Math.min(1, S.fire + .025 * dt);
+      S.toastCd -= dt;
+      // fire visuals
+      const f = S.fire; const flick = 1 + Math.sin(t * 17) * .05 + Math.sin(t * 29) * .04;
+      flame.visible = f > .02; flame.scale.set((.55 + .75 * f) * flick, (.7 + 1.1 * f) * (2 - flick), 1); flame.material.rotation = Math.sin(t * 5) * .06;
+      fireLight.intensity = 8 * f * flick; binFace.userData.setMood(f > 0.02 ? "worried" : "happy");
+      if (f > .02) for (let i = 0; i < Math.ceil(3 * f); i++) flames.spawn(new THREE.Vector3(rand(-.28, .28) * (.5 + f), .8, -2.15 + rand(-.15, .15)), new THREE.Vector3(rand(-.2, .2), rand(1.2, 2.4) * (.4 + f), 0), { life: rand(.35, .7), s0: .35 * (.4 + f), s1: .08, c0: 0xffd36b, c1: 0xff3b5c });
+      if (f > .1 && Math.random() < .25) smoke.spawn(new THREE.Vector3(rand(-.2, .2), 1.4 + f, -2.2), new THREE.Vector3(rand(-.15, .15), .6, 0), { life: 2.2, s0: .3, s1: 1.1, c0: 0xc8a9b9, a: .35 * f });
+      flames.update(dt); smoke.update(dt); foam.update(dt); sparkle.update(dt);
+      hud.meter("fire", "Fire", f, Math.round(f * 100) + "%"); hud.meter("agent", "Extinguisher", S.charge, Math.round(S.charge * 100) + "%");
+      // end states
+      if (!S.done && S.fire <= 0) {
+        S.done = true; Sound.hiss(false); Sound.win(); buzz([30, 40, 60]); hud.toast("Fire out!", "good"); confetti(sparkle, new THREE.Vector3(0, 1.2, -2.1), 50);
+        const acc = S.sprayT ? S.baseT / S.sprayT : 0; const stars = 1 + (S.charge > .3 ? 1 : 0) + (acc > .7 ? 1 : 0);
+        finish({ stars, title: "The bin is safe!", stats: [["Time", fmtTime(elapsed)], ["On the base", Math.round(acc * 100) + "%"], ["Agent left", Math.round(S.charge * 100) + "%"]], note: stars < 3 ? (acc <= .7 ? "Tip: keep the circle green on the base the whole time you squeeze." : "Tip: sweep wider and faster to save agent.") : "" , delay: 1400 });
+      } else if (!S.done && S.charge <= 0) {
+        S.done = true; Sound.hiss(false); Sound.bad(); hud.toast("Out of agent", "bad");
+        finish({ stars: 0, title: "Back out and close the door", stats: [["Time", fmtTime(elapsed)], ["Fire left", Math.round(S.fire * 100) + "%"], ["On the base", Math.round((S.sprayT ? S.baseT / S.sprayT : 0) * 100) + "%"]], note: "That's the right call in real life too: if one extinguisher doesn't do it, leave, close the door to contain the fire, and let the fire team take over." });
+      }
+    },
+    idle(dt, t) { flame.scale.set(1.3 * (1 + Math.sin(t * 17) * .05), 1.8, 1); flames.update(dt); for (let i = 0; i < 3; i++) flames.spawn(new THREE.Vector3(rand(-.4, .4), .8, -2.15), new THREE.Vector3(rand(-.2, .2), rand(1.5, 3), 0), { life: rand(.35, .7), s0: .4, s1: .08, c0: 0xffd36b, c1: 0xff3b5c }); camera.rotation.set(-.18, 0, 0); },
+    dispose() { Sound.hiss(false); },
+  };
+  function pullPin() { if (S.pinGone) return; S.pinGone = true; S.pinT = clock.elapsedTime; seal.visible = false; Sound.pop(); Sound.tone(1400, .08, "square", .05, 1, .05); buzz(15); hud.toast("Pin out!", "good"); setStep(1); }
+  function maybeToast(a, b, c) { if (S.toastCd <= 0) { hud.toast(a, b, c); S.toastCd = 2.2; } }
+  return P;
+}
+
+/* =====================================================================
+   2. HAND HYGIENE: Scrub Squad (WHO steps, 20 seconds)
+   ===================================================================== */
+function buildHands() {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xd9f6ff); scene.fog = new THREE.Fog(0xd9f6ff, 5, 12);
+  const camera = new THREE.PerspectiveCamera(60, 1, .03, 30); camera.position.set(0, 1.52, .78); camera.lookAt(0, 1.0, -.32); scene.add(camera);
+  lights(scene, { key: [1.5, 4, 2.5], shadowSize: 3 });
+  const R = room(scene, { w: 6, d: 6, zBack: -.85, wall: 0xdff6ff, tiles: ["#ffffff", "#c9f3dc"] }); scene.add(R.g);
+  const wallTiles = canvasTex(128, 128, (c) => { c.fillStyle = "#ffffff"; c.fillRect(0, 0, 128, 128); c.strokeStyle = "#bfe9f7"; c.lineWidth = 6; c.strokeRect(0, 0, 64, 64); c.strokeRect(64, 0, 64, 64); c.strokeRect(0, 64, 64, 64); c.strokeRect(64, 64, 64, 64); }, [8, 5]);
+  R.wallMat.map = wallTiles; R.wallMat.color.set(0xffffff); R.wallMat.needsUpdate = true;
+  // counter + sink
+  scene.add(mesh(rbox(2.4, .9, .9, .05), M(0xffb3d6), 0, .45, -.4));
+  scene.add(mesh(rbox(2.5, .08, 1.0, .04), M(0xffffff), 0, .92, -.4));
+  const basin = mesh(new THREE.CylinderGeometry(.42, .36, .03, 40), M(0xe4eef8, { roughness: .2 }), 0, .955, -.32, false); basin.scale.z = .7; scene.add(basin);
+  { const rim = put(scene, mesh(new THREE.TorusGeometry(.43, .03, 10, 40), M(0xffffff), 0, .965, -.32, false)); rim.rotation.x = Math.PI / 2; rim.scale.set(1, .7, 1); }
+  const drain = mesh(new THREE.CylinderGeometry(.04, .04, .01, 16), M(0xb8c3cf, { metalness: .6 }), 0, .972, -.3, false); scene.add(drain);
+  const chrome = M(0xeef2f8, { metalness: .85, roughness: .15 });
+  scene.add(mesh(new THREE.CylinderGeometry(.05, .06, .32, 20), chrome, 0, 1.1, -.74));
+  const spout = mesh(new THREE.TorusGeometry(.14, .035, 12, 24, Math.PI), chrome, 0, 1.26, -.6); spout.rotation.y = Math.PI / 2; scene.add(spout);
+  const tapHandle = mesh(rbox(.2, .05, .06, .02), M(0x6cc6ff), .14, 1.2, -.74); scene.add(tapHandle);
+  const water = mesh(new THREE.CylinderGeometry(.025, .035, .44, 14, 1, true), new THREE.MeshPhysicalMaterial({ color: 0x9fdcff, transparent: true, opacity: .55, roughness: .05, transmission: .2 }), 0, 1.0, -.46, false); water.visible = false; scene.add(water);
+  // soap pump with face
+  const soap = new THREE.Group(); soap.position.set(.62, .96, -.55); scene.add(soap);
+  soap.add(mesh(rbox(.2, .28, .16, .07), M(0xff8cc3, { transmission: .1 }), 0, .14, 0));
+  soap.add(mesh(new THREE.CylinderGeometry(.03, .03, .1, 12), M(0xffffff), 0, .32, 0));
+  const pumpHead = mesh(rbox(.14, .04, .05, .015), M(0xffffff), -.04, .38, 0); soap.add(pumpHead);
+  const soapFace = face(.38); soapFace.position.set(0, .13, .085); soap.add(soapFace);
+  // paper towel dispenser
+  const towel = new THREE.Group(); towel.position.set(-.85, 1.35, -.78); scene.add(towel);
+  towel.add(mesh(rbox(.4, .36, .16, .06), M(0xffffff), 0, 0, 0));
+  const sheetM = mesh(rbox(.24, .2, .01, .004), M(0xfff3e0, { clearcoat: 0 }), 0, -.27, .05, false); towel.add(sheetM);
+  const towelLab = mesh(new THREE.PlaneGeometry(.3, .1), new THREE.MeshBasicMaterial({ map: label("towels", { w: 256, h: 84, font: 46 }), transparent: true }), 0, .05, .085, false); towel.add(towelLab);
+  // mirror + poster
+  scene.add(mesh(rbox(1.1, .8, .05, .2), M(0xff8cc3), 0, 1.75, -.83, false));
+  scene.add(mesh(rbox(.98, .68, .02, .17), M(0xdff3ff, { metalness: .3, roughness: .05 }), 0, 1.75, -.8, false));
+  const poster = mesh(new THREE.PlaneGeometry(.62, .42), new THREE.MeshBasicMaterial({ map: label("20 seconds\nof scrubbing", { w: 400, h: 270, font: 54 }) }), .98, 1.7, -.83, false); scene.add(poster);
+
+  // hands
+  const L = makeHand(0xffd6c2, 0xff7fbf, 1), Rh = makeHand(0xffd6c2, 0xff7fbf, -1); L.userData.arm.visible = Rh.userData.arm.visible = false;
+  const handsRoot = new THREE.Group(); handsRoot.position.set(0, 1.12, -.26); scene.add(handsRoot);
+  handsRoot.add(L); handsRoot.add(Rh);
+  const base = { L: new THREE.Vector3(-.12, 0, 0), R: new THREE.Vector3(.12, 0, 0) };
+  const foamPuffs = [];
+  for (let i = 0; i < 16; i++) { const s = sprite(BUBBLE, rand(.03, .06), rand(-.08, .08), rand(-.08, .14), rand(-.04, .04)); s.material.opacity = 0; (i % 2 ? L : Rh).add(s); foamPuffs.push(s); }
+  // germs, each owned by a scrub step (1..5)
+  const germKeys = ["germ-1", "germ-2", "germ-3", "germ-4"]; const germs = [];
+  const spots = [
+    [1, L, 0, .02, .04], [1, Rh, .02, -.03, .04], [1, L, -.04, -.05, .04],
+    [2, L, .03, .04, -.04], [2, Rh, -.03, .01, -.04], [2, Rh, .04, -.06, -.04],
+    [3, L, -.02, .14, .03], [3, Rh, .02, .16, .03], [3, L, .04, .13, -.03],
+    [4, L, .1, .02, .03], [4, Rh, -.1, .02, .03],
+    [5, L, -.06, .19, .02], [5, Rh, .06, .2, .02], [5, Rh, 0, .21, .02],
+  ];
+  spots.forEach(([st, hand, x, y, z], i) => { const s = sprite(germKeys[i % 4], .075, x, y, z); s.userData = { st, alive: true, pop: 0, base: .075, ph: rand(0, 6) }; hand.add(s); germs.push(s); });
+  const bubbles = new Pool(scene, BUBBLE, 80); const sparkle = new Pool(scene, STAR, 50, true); const drops = new Pool(scene, SOFT, 60);
+
+  const STEPS = [
+    { id: "soap", chip: "Soap", big: "1", title: "Wet & soap", text: "Hands under the water, then tap the soap pump twice.", glyph: "tap" },
+    { id: "palms", chip: "Palms", big: "2", title: "Palm to palm", text: "Draw circles to rub your palms together.", glyph: "circle", need: 3.2, kind: "circle" },
+    { id: "backs", chip: "Backs", big: "3", title: "Backs of hands", text: "Swipe left and right, palm over the back of the other hand.", glyph: "side", need: 3.2, kind: "side" },
+    { id: "between", chip: "Fingers", big: "4", title: "Between fingers", text: "Fingers laced. Swipe up and down.", glyph: "updown", need: 3.2, kind: "updown" },
+    { id: "thumbs", chip: "Thumbs", big: "5", title: "Thumbs", text: "Grip each thumb and twist. Draw circles.", glyph: "circle", need: 2.4, kind: "circle" },
+    { id: "tips", chip: "Tips", big: "6", title: "Fingertips", text: "Rub fingertips into your palm. Tap fast!", glyph: "tap", need: 10, kind: "tap" },
+    { id: "rinse", chip: "Rinse", big: "7", title: "Rinse", text: "Press and hold to rinse all the soap off.", glyph: "hold", need: 2, kind: "hold" },
+    { id: "dry", chip: "Dry", big: "8", title: "Dry & tap off", text: "Tap the paper towel. Then use it to turn the tap off.", glyph: "tap" },
+  ];
+  const S = { i: 0, prog: 0, phase: 0, last: null, lastAng: null, down: false, holdT: 0, soapTaps: 0, wrong: 0, wrongCd: 0, scrub: 0, dried: false, done: false };
+  hud.setSteps(STEPS.map((s) => s.chip));
+  hud.meter("germs", "Germs left", 1, germs.length + ""); hud.meter("scrub", "Scrub time", 0, "0 / 20s", "#2fb36d");
+  function setStep(i) { S.i = i; S.prog = 0; const s = STEPS[i]; hud.step(i); hud.coach(s.big, s.title, s.text, s.glyph); }
+  function wrongHint() { S.wrong++; if (S.wrongCd <= 0) { const s = STEPS[S.i]; hud.toast("Try this move", "", s.text); S.wrongCd = 2.2; } }
+  function addProg(a) {
+    const s = STEPS[S.i]; if (!s.need) return; S.prog += a; S.phase += a * Math.PI * 1.2; Sound.tone(500 + Math.random() * 300, .04, "sine", .02);
+    if (Math.random() < .5) bubbles.spawn(handsRoot.position.clone().add(new THREE.Vector3(rand(-.15, .15), rand(-.05, .15), .05)), new THREE.Vector3(rand(-.2, .2), rand(.1, .4), rand(0, .2)), { life: 1.1, s0: .03, s1: .07, a: .9 });
+    const mine = germs.filter((g) => g.userData.st === S.i && g.userData.alive);
+    const total = spots.filter((p) => p[0] === S.i).length;
+    const shouldBeDead = Math.floor((S.prog / s.need) * (total + .5));
+    if (total - mine.length < shouldBeDead && mine[0]) popGerm(mine[0]);
+    if (S.prog >= s.need) { germs.filter((g) => g.userData.st === S.i && g.userData.alive).forEach(popGerm); Sound.good(); buzz(20); hud.toast("Clean!", "good"); setStep(S.i + 1); if (S.i === 6) { water.visible = true; } }
+  }
+  function popGerm(g) { g.userData.alive = false; g.userData.pop = .001; Sound.pop(); buzz(8); const w = g.getWorldPosition(new THREE.Vector3()); for (let k = 0; k < 6; k++) sparkle.spawn(w, new THREE.Vector3(rand(-.6, .6), rand(.2, .9), rand(0, .5)), { life: .6, s0: .05, s1: .01, c0: [0x8ff0b0, 0xffd25a, 0xffffff][k % 3] }); }
+  const P = {
+    scene, camera, minHFov: 46, baseV: 52,
+    begin() { setStep(0); water.visible = true; },
+    down(p) {
+      if (S.done) return; S.down = true; S.last = p; S.lastAng = null;
+      const s = STEPS[S.i];
+      if (s.id === "soap") { S.soapTaps++; pumpHead.position.y = .34; setTimeout(() => (pumpHead.position.y = .38), 120); Sound.pop(); bubbles.spawn(new THREE.Vector3(.58, 1.3, -.5), new THREE.Vector3(-.4, -.2, .2), { life: .6, s0: .06, s1: .1 });
+        foamPuffs.forEach((f, k) => { if (k < S.soapTaps * 8) f.material.opacity = .95; }); if (S.soapTaps >= 2) { water.visible = false; hud.toast("Lathered up!", "good"); Sound.good(); setStep(1); } }
+      else if (s.kind === "tap") addProg(1);
+      else if (s.id === "dry") {
+        if (!S.dried) { S.dried = true; sheetM.position.y = -.4; Sound.pop(); hud.toast("Pat dry", "good", "Now use the towel on the tap"); hud.coach("8", "Turn the tap off", "Use the paper towel to turn the tap off, so clean hands don't touch it. Tap again.", "tap"); }
+        else { tapHandle.rotation.y = .9; Sound.good(); finishHands(); }
+      } else if (s.kind !== "hold" && s.kind) { /* drags */ }
+    },
+    move(p, pressed) {
+      if (!S.down || S.done) return; const s = STEPS[S.i]; if (!s.kind || s.kind === "tap" || s.kind === "hold") { S.last = p; return; }
+      const dx = p.x - S.last.x, dy = p.y - S.last.y, d = Math.hypot(dx, dy); if (d < 2) return;
+      const unit = Math.min(innerWidth, innerHeight);
+      if (s.kind === "circle") {
+        const ang = Math.atan2(dy, dx);
+        if (S.lastAng != null) { let da = ang - S.lastAng; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI; if (Math.abs(da) > .02 && Math.abs(da) < 1.2) addProg(Math.abs(da) / (2 * Math.PI) * .9); else if (Math.abs(da) <= .02 && d > 6) S.straight = (S.straight || 0) + d; }
+        if ((S.straight || 0) > unit * .8) { S.straight = 0; wrongHint(); }
+        S.lastAng = ang;
+      } else if (s.kind === "side") { if (Math.abs(dx) > Math.abs(dy) * 1.2) addProg(Math.abs(dx) / unit * 1.1); else if (Math.abs(dy) > 8) { S.off = (S.off || 0) + d; if (S.off > unit) { S.off = 0; wrongHint(); } } }
+      else if (s.kind === "updown") { if (Math.abs(dy) > Math.abs(dx) * 1.2) addProg(Math.abs(dy) / unit * 1.1); else if (Math.abs(dx) > 8) { S.off = (S.off || 0) + d; if (S.off > unit) { S.off = 0; wrongHint(); } } }
+      S.last = p;
+    },
+    up() { S.down = false; },
+    key(k, down) {
+      if (!down) { if (k === " ") S.down = false; return k === " "; }
+      const s = STEPS[S.i];
+      if (k === " " || k === "Enter") { if (s.kind === "hold") { S.down = true; return true; } P.down({ x: innerWidth / 2, y: innerHeight / 2 }); S.down = false; return true; }
+      if (s.kind === "side" && (k === "ArrowLeft" || k === "ArrowRight")) { addProg(.35); return true; }
+      if (s.kind === "updown" && (k === "ArrowUp" || k === "ArrowDown")) { addProg(.35); return true; }
+      if (s.kind === "circle" && k.startsWith("Arrow")) { addProg(.22); return true; }
+      return false;
+    },
+    update(dt, t) {
+      const s = STEPS[S.i]; S.wrongCd -= dt;
+      if (s.kind && s.kind !== "hold" && S.i >= 1 && S.i <= 5 && S.down) S.scrub += dt;
+      if (s.kind && s.kind !== "hold" && S.i >= 1 && S.i <= 5 && !S.down) S.scrub += dt * .25;
+      if (s.kind === "hold" && S.down) {
+        const now = performance.now(); const rd = S.rinseLast ? Math.min(.25, (now - S.rinseLast) / 1000) : 0; S.rinseLast = now; addProg(rd);
+        for (let k = 0; k < 3; k++) drops.spawn(new THREE.Vector3(rand(-.03, .03), 1.2, -.46), new THREE.Vector3(rand(-.3, .3), -1.5, rand(0, .3)), { life: .5, s0: .03, s1: .05, c0: 0x9fdcff, a: .8, g: -4 });
+        foamPuffs.forEach((f) => (f.material.opacity = Math.max(0, f.material.opacity - dt * .6))); Sound.hiss(true, 900);
+      } else if (s.kind === "hold") { Sound.hiss(false); S.rinseLast = 0; }
+      if (s.id === "dry") Sound.hiss(false);
+      water.visible = s.id === "soap" || (s.kind === "hold" && S.down) || (s.id === "dry" && !S.done && tapHandle.rotation.y === 0 && false);
+      water.scale.x = water.scale.z = 1 + Math.sin(t * 30) * .08;
+      // hand choreography per step
+      const ph = S.phase, idle = Math.sin(t * 2) * .006; const tgtL = base.L.clone(), tgtR = base.R.clone(); let rL = new THREE.Euler(0, .9, 0), rR = new THREE.Euler(0, -.9, 0);
+      const id = s.id;
+      if (id === "soap") { tgtL.set(-.13, -.02 + idle, .02); tgtR.set(.13, -.02 - idle, .02); rL.set(-.5, .5, .2); rR.set(-.5, -.5, -.2); }
+      if (id === "palms") { tgtL.set(-.065, 0, 0); tgtR.set(.065 + Math.cos(ph) * .02, Math.sin(ph) * .03, 0); rL.set(0, 1.45, 0); rR.set(0, -1.45, 0); }
+      if (id === "backs") { tgtL.set(-.04, -.01, 0); tgtR.set(.0 + Math.sin(ph) * .05, .01, .055); rL.set(-1.2, 0, .3); rR.set(-1.2, 0, -.3 + Math.sin(ph) * .1); }
+      if (id === "between") { tgtL.set(-.06, Math.sin(ph) * .03, 0); tgtR.set(.06, -Math.sin(ph) * .03, 0); rL.set(0, 1.4, .25); rR.set(0, -1.4, -.25); }
+      if (id === "thumbs") { tgtL.set(-.07, 0, 0); tgtR.set(.07, 0, 0); rL.set(0, 1.3, Math.sin(ph) * .35); rR.set(0, -1.3, -.2); }
+      if (id === "tips") { tgtL.set(-.08, -.02, 0); tgtR.set(.06, .04 + Math.abs(Math.sin(ph)) * .03, .03); rL.set(-1.3, .3, 0); rR.set(-.2, -.4, 2.4); }
+      if (id === "rinse") { tgtL.set(-.08, -.08 + idle, .02); tgtR.set(.08, -.08 - idle, .02); rL.set(-.7, .4, .3); rR.set(-.7, -.4, -.3); }
+      if (id === "dry") { tgtL.set(-.16, -.02 + idle, .03); tgtR.set(.16, -.02 - idle, .03); rL.set(-.25, .2, .1); rR.set(-.25, -.2, -.1); }
+      const kk = 1 - Math.exp(-dt * 12);
+      L.position.lerp(tgtL, kk); Rh.position.lerp(tgtR, kk);
+      L.rotation.set(lerp(L.rotation.x, rL.x, kk), lerp(L.rotation.y, rL.y, kk), lerp(L.rotation.z, rL.z, kk));
+      Rh.rotation.set(lerp(Rh.rotation.x, rR.x, kk), lerp(Rh.rotation.y, rR.y, kk), lerp(Rh.rotation.z, rR.z, kk));
+      // germ wiggle / pop
+      let alive = 0;
+      germs.forEach((g) => { const u = g.userData; if (u.alive) { alive++; const w = 1 + Math.sin(t * 6 + u.ph) * .08; g.scale.set(u.base * w, u.base / w, 1); g.material.rotation = Math.sin(t * 3 + u.ph) * .2; } else if (u.pop > 0) { u.pop += dt; const k2 = u.pop / .25; g.scale.setScalar(u.base * (1 + k2)); g.material.opacity = 1 - k2; if (k2 >= 1) { u.pop = 0; g.visible = false; } } });
+      foamPuffs.forEach((f, k) => { f.scale.setScalar(.045 + Math.sin(t * 4 + k) * .008); });
+      soapFace.rotation.z = Math.sin(t * 2) * .05;
+      hud.meter("germs", "Germs left", alive / germs.length, alive + ""); hud.meter("scrub", "Scrub time", S.scrub / 20, Math.floor(S.scrub) + " / 20s");
+      bubbles.update(dt); sparkle.update(dt); drops.update(dt);
+    },
+    idle(dt, t) { L.position.copy(base.L); Rh.position.copy(base.R); L.rotation.set(-.5, .5, .2); Rh.rotation.set(-.5, -.5, -.2); handsRoot.position.y = 1.1 + Math.sin(t * 2) * .01; },
+    dispose() { Sound.hiss(false); },
+  };
+  function finishHands() {
+    S.done = true; Sound.hiss(false); Sound.win(); buzz([30, 40, 60]); hud.step(8); hud.toast("Squeaky clean!", "good"); confetti(sparkle, new THREE.Vector3(0, 1.2, -.3), 50);
+    const stars = 1 + (S.scrub >= 20 ? 1 : 0) + (S.wrong <= 3 ? 1 : 0);
+    finish({ stars, title: "Germs gone!", stats: [["Time", fmtTime(elapsed)], ["Scrub time", Math.floor(S.scrub) + "s"], ["Wrong moves", S.wrong]], note: S.scrub < 20 ? "Tip: aim for at least 20 seconds of scrubbing, about two rounds of Happy Birthday." : "", delay: 1300 });
+  }
+  return P;
+}
+
+/* =====================================================================
+   3. CPR: Keep the Beat (hands-only CPR rhythm)
+   ===================================================================== */
+function buildCPR() {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xffe0ee); scene.fog = new THREE.Fog(0xffe0ee, 6, 16);
+  const camera = new THREE.PerspectiveCamera(60, 1, .03, 30); camera.position.set(0, 1.72, .55); camera.lookAt(0, .1, -.32); scene.add(camera);
+  lights(scene, { key: [1.5, 5, 2], shadowSize: 4 });
+  const R = room(scene, { w: 8, d: 8, zBack: -4.2, wall: 0xffe0ee }); scene.add(R.g);
+  windowOn(scene, 1.6, 2.2, -4.13, 1.6, 1.1, R.sky); crossSign(scene, -1.4, 2.6, -4.13, .55); bed(scene, -2.8, -2.6, .3);
+  const aed = new THREE.Group(); aed.position.set(2.2, 0, -3.9); scene.add(aed);
+  aed.add(mesh(rbox(.6, .7, .3, .08), M(0x2fb36d), 0, 1.4, 0)); aed.add(mesh(new THREE.PlaneGeometry(.46, .2), new THREE.MeshBasicMaterial({ map: label("AED", { w: 256, h: 110, font: 70, bg: "#ffffff", fg: "#1f9d5b", radius: 30 }) }), 0, 1.45, .16, false));
+  aed.add(sprite("heart", .22, 0, 1.25, .2));
+  // mat + patient "Patch" (a plush training mannequin)
+  scene.add(mesh(rbox(1.6, .06, 2.2, .03), M(0x8fd3ff), 0, .03, -.4));
+  const patch = new THREE.Group(); patch.position.set(0, .06, -.35); scene.add(patch);
+  const scrub = M(0x9be7c9, { sheen: .6, sheenColor: new THREE.Color(0xffffff), clearcoat: .2, roughness: .7 });
+  const skin = M(0xffe1cf, { sheen: .5, sheenColor: new THREE.Color(0xffd0d0), clearcoat: .3, roughness: .6 });
+  const torso = new THREE.Group(); patch.add(torso);
+  const chest = mesh(rbox(.56, .2, .62, .1), scrub, 0, .12, .05); torso.add(chest);
+  torso.add(mesh(rbox(.5, .17, .4, .09), M(0x6cc6ff, { roughness: .7, clearcoat: .2 }), 0, .1, .52));
+  const head = mesh(new THREE.SphereGeometry(.17, 32, 24), skin, 0, .16, -.42); head.scale.set(1, .85, 1); patch.add(head);
+  const hair = mesh(new THREE.SphereGeometry(.175, 32, 16, 0, Math.PI * 2, 0, Math.PI * .45), M(0xffb347, { roughness: .6 }), 0, .17, -.46); hair.rotation.x = -1.3; patch.add(hair);
+  const pf = face(.45, "sleep"); pf.position.set(0, .3, -.42); pf.rotation.x = -Math.PI / 2; patch.add(pf);
+  for (const sx of [-1, 1]) {
+    const arm = mesh(new THREE.CapsuleGeometry(.055, .42, 6, 12), scrub, sx * .36, .09, .08); arm.rotation.x = Math.PI / 2; arm.rotation.z = sx * .12; patch.add(arm);
+    patch.add(mesh(new THREE.SphereGeometry(.06, 16, 12), skin, sx * .39, .09, .38));
+    const leg = mesh(new THREE.CapsuleGeometry(.075, .55, 6, 12), M(0x6cc6ff, { roughness: .7 }), sx * .13, .08, 1.0); leg.rotation.x = Math.PI / 2; patch.add(leg);
+  }
+  const heartS = sprite("heart", .16, 0, .26, .0); heartS.material.opacity = .35; torso.add(heartS);
+  // rescuer's hands (stacked) + arms reaching from the camera
+  const hands = new THREE.Group(); patch.add(hands); hands.position.set(0, .34, .02);
+  const h1 = makeHand(0xffd6c2, 0xff7fbf, 1); h1.rotation.set(-1.45, 0, 0); h1.scale.setScalar(1.15); h1.userData.arm.visible = false; hands.add(h1);
+  const h2 = makeHand(0xffd6c2, 0xff7fbf, -1); h2.rotation.set(-1.45, 0, .15); h2.position.set(0, .05, .02); h2.scale.setScalar(1.15); h2.userData.arm.visible = false; hands.add(h2);
+  const hearts = new Pool(scene, tex("heart"), 30); const sparkle = new Pool(scene, STAR, 60, true);
+
+  const BPM_LOW = 100, BPM_HIGH = 120;
+  const STEPS = ["Check", "Call", "Push", "Breathe", "Push", "AED"];
+  const S = { i: 0, taps: 0, count: 0, last: 0, good: 0, total: 0, press: 0, hold: false, holdT: 0, breaths: 0, rates: [], checkTaps: 0, done: false, beatT: 0, guide: true, life: 0 };
+  hud.setSteps(STEPS);
+  const beat = hud.extra(`<i></i><b id="cprCount"></b>`, "beat"); beat.hidden = true;
+  const callBtn = hud.extra(`<button class="sc-cta" id="callBtn">Call Code Blue + get the AED</button>`, ""); callBtn.style.cssText = "position:absolute;left:50%;transform:translateX(-50%);bottom:calc(env(safe-area-inset-bottom,0px) + 116px);"; callBtn.hidden = true;
+  hud.meter("rate", "Rate /min", 0, "–", "#ff5fb0"); hud.meter("tempo", "On tempo", 0, "–", "#2fb36d"); hud.meter("life", "Heart", 0, "0%", "#ff335c");
+  function setStep(i) {
+    S.i = i; hud.step(i); beat.hidden = !(i === 2 || i === 4); callBtn.hidden = i !== 1;
+    if (i === 0) hud.coach("1", "Check", "Tap Patch's shoulders and ask \"Are you okay?\" Tap twice.", "tap");
+    if (i === 1) hud.coach("2", "Call for help", "No answer, not breathing normally. Call Code Blue and send someone for the AED.", "");
+    if (i === 2 || i === 4) { S.count = 0; hud.coach("3", "Push hard & fast", "Tap to the beat, 100 to 120 a minute, centre of the chest. 30 pushes.", "tap"); $("#cprCount").textContent = "0"; }
+    if (i === 3) { S.breaths = 0; hud.coach("4", "2 rescue breaths", "Tilt the head, lift the chin. Press and hold for about 1 second, twice.", "hold"); }
+  }
+  callBtn.querySelector("button").onclick = () => { Sound.good(); buzz(20); hud.toast("Help is coming!", "good", "The AED is on its way"); setStep(2); };
+  function compress() {
+    const now = clock.elapsedTime; S.press = 1; Sound.thump(); buzz(12); S.count++; $("#cprCount").textContent = S.count;
+    if (S.last) {
+      const iv = now - S.last, bpm = 60 / iv; S.rates.push(bpm); if (S.rates.length > 4) S.rates.shift(); S.total++;
+      const avg = S.rates.reduce((a, b) => a + b, 0) / S.rates.length; hud.meter("rate", "Rate /min", clamp((avg - 60) / 100, 0, 1), Math.round(avg) + "");
+      if (bpm >= BPM_LOW - 4 && bpm <= BPM_HIGH + 6) { S.good++; S.life = Math.min(1, S.life + .018); if (S.count % 5 === 0) hud.toast("Great rhythm", "good"); hearts.spawn(new THREE.Vector3(rand(-.2, .2), .5, -.3), new THREE.Vector3(rand(-.3, .3), 1, .3), { life: .9, s0: .08, s1: .12 }); }
+      else if (bpm < BPM_LOW - 4) { if (iv < 3) hud.toast("Faster", "bad"); }
+      else hud.toast("Slow down", "bad");
+      hud.meter("tempo", "On tempo", S.good / S.total, Math.round(S.good / S.total * 100) + "%");
+    }
+    S.last = now;
+    if (S.count >= 30) { Sound.good(); S.last = 0; S.rates = []; if (S.i === 2) setStep(3); else endCPR(); }
+  }
+  const P = {
+    scene, camera, minHFov: 60, baseV: 55,
+    begin() { setStep(0); },
+    down() {
+      if (S.done) return;
+      if (S.i === 0) { S.checkTaps++; Sound.tone(520, .08, "triangle", .1); patch.position.x = .02; setTimeout(() => (patch.position.x = 0), 90); hud.toast(S.checkTaps === 1 ? "\"Are you okay?\"" : "No response", S.checkTaps === 1 ? "" : "bad", S.checkTaps === 1 ? "" : "Not breathing normally"); if (S.checkTaps >= 2) setTimeout(() => setStep(1), 700); return; }
+      if (S.i === 2 || S.i === 4) { compress(); return; }
+      if (S.i === 3) { S.hold = true; S.holdT = 0; S.holdStart = performance.now(); }
+    },
+    up() { if (S.i === 3 && S.hold) { S.hold = false; if (S.holdT < .7) hud.toast("Hold a little longer", "bad", "About one second per breath"); } },
+    key(k, down) { if (k === " " || k === "Enter") { if (down) P.down(); else P.up(); return true; } return false; },
+    update(dt, t) {
+      // metronome guide
+      if (S.i === 2 || S.i === 4) { S.beatT += dt; if (S.beatT >= 60 / 110) { S.beatT -= 60 / 110; const r = beat.querySelector("i"); r.classList.remove("go"); void r.offsetWidth; r.classList.add("go"); if (S.guide) Sound.tick(false); } }
+      if (S.i === 3 && S.hold) {
+        S.holdT = (performance.now() - S.holdStart) / 1000; head.rotation.x = lerp(head.rotation.x, -.3, dt * 6); chest.scale.y = 1 + Math.min(S.holdT, 1) * .25;
+        if (S.holdT >= 1) { S.hold = false; S.breaths++; if (S.breaths < 2) hud.coach("4", "One more breath", "Press and hold again for about 1 second.", "hold"); Sound.tone(440, .4, "sine", .08, 1.3); hud.toast("Breath " + S.breaths, "good"); S.life = Math.min(1, S.life + .05); if (S.breaths >= 2) setTimeout(() => setStep(4), 500); }
+      } else { chest.scale.y = lerp(chest.scale.y, 1, dt * 5); head.rotation.x = lerp(head.rotation.x, 0, dt * 3); }
+      S.press = Math.max(0, S.press - dt * 7);
+      const comp = Math.sin(S.press * Math.PI / 2); hands.position.y = .34 - comp * .07; torso.scale.y = 1 - comp * .2; camera.position.y = 1.72 - comp * .02;
+      heartS.material.opacity = .35 + S.life * .65; const hb = 1 + comp * .3; heartS.scale.set(.16 * hb + S.life * .08, .16 * hb + S.life * .08, 1);
+      hud.meter("life", "Heart", S.life, Math.round(S.life * 100) + "%");
+      hearts.update(dt); sparkle.update(dt);
+    },
+    dispose() {},
+  };
+  function endCPR() {
+    S.done = true; hud.step(5); beat.hidden = true; hud.coach("✓", "The AED team is here", "They take over. Patch is breathing again!", "");
+    Sound.win(); buzz([30, 40, 60]); pf.userData.setMood("happy"); pf.position.y = .31; confetti(sparkle, new THREE.Vector3(0, .5, -.6), 50);
+    for (let i = 0; i < 10; i++) hearts.spawn(new THREE.Vector3(rand(-.3, .3), .4, -.6), new THREE.Vector3(rand(-.6, .6), rand(1, 2), rand(0, .4)), { life: 1.5, s0: .1, s1: .2 });
+    const acc = S.total ? S.good / S.total : 0; const stars = 1 + (acc >= .6 ? 1 : 0) + (acc >= .85 ? 1 : 0);
+    finish({ stars, title: "Patch is breathing!", stats: [["Time", fmtTime(elapsed)], ["On tempo", Math.round(acc * 100) + "%"], ["Pushes", 60]], note: acc < .85 ? "Tip: follow the pulsing ring. 100 to 120 a minute is about the beat of \"Stayin' Alive\"." : "", delay: 1600 });
+  }
+  return P;
+}
+
+/* =====================================================================
+   4. SHARPS & WASTE: Safe Sort (conveyor)
+   ===================================================================== */
+function buildSort() {
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xe4ffef); scene.fog = new THREE.Fog(0xe4ffef, 8, 18);
+  const camera = new THREE.PerspectiveCamera(60, 1, .05, 40); camera.position.set(0, 2.85, 3.2); camera.lookAt(0, .45, -1.4); scene.add(camera);
+  lights(scene, { key: [2, 6, 3], shadowSize: 6 });
+  const R = room(scene, { w: 9, d: 10, zBack: -6, wall: 0xe0f9ec, tiles: ["#ffffff", "#d3f5e2"] }); scene.add(R.g);
+  windowOn(scene, -2.4, 2.5, -5.93, 1.8, 1.1, R.sky); crossSign(scene, 2.4, 2.7, -5.93, .6);
+  // conveyor
+  const beltTex = canvasTex(64, 64, (c) => { c.fillStyle = "#ffb3d6"; c.fillRect(0, 0, 64, 64); c.fillStyle = "#ff8cc3"; c.fillRect(0, 0, 64, 18); }, [1, 10]);
+  const belt = mesh(new THREE.BoxGeometry(1.1, .06, 6.4), new THREE.MeshStandardMaterial({ map: beltTex, roughness: .6 }), 0, .95, -3.0); scene.add(belt);
+  for (const sx of [-1, 1]) scene.add(mesh(rbox(.1, .16, 6.5, .04), M(0xffffff), sx * .6, 1.0, -3.0));
+  for (let z = -5.8; z <= 0; z += 1.4) for (const sx of [-1, 1]) scene.add(mesh(new THREE.CylinderGeometry(.05, .05, .9, 10), M(0xd9d4dc, { metalness: .5 }), sx * .5, .45, z));
+  put(scene, mesh(new THREE.CylinderGeometry(.08, .08, 1.12, 20), M(0xffffff), 0, .95, .2)).rotation.z = Math.PI / 2;
+  // bins
+  const BINS = [
+    { name: "Sharps", color: 0xffd23f, lid: 0xff335c, x: -1.25 },
+    { name: "Biohazard", color: 0xff335c, lid: 0xc8133e, x: 0 },
+    { name: "General", color: 0x5fd39a, lid: 0x2fb36d, x: 1.25 },
+  ];
+  const binObjs = BINS.map((b, i) => {
+    const g = new THREE.Group(); g.position.set(b.x * .9, 0, 1.0); g.scale.setScalar(.8); scene.add(g);
+    const body = mesh(rbox(.9, .72, .7, .1), M(b.color), 0, .36, 0); g.add(body);
+    const lid = mesh(rbox(.94, .08, .74, .04), M(b.lid), 0, .76, 0); g.add(lid);
+    const f = face(.75, "happy"); f.position.set(0, .3, .36); g.add(f);
+    const tag = mesh(new THREE.PlaneGeometry(.7, .2), new THREE.MeshBasicMaterial({ map: label(b.name, { w: 360, h: 100, font: 54, fg: i === 0 ? "#7a5200" : i === 1 ? "#c8133e" : "#1f7a4b" }), transparent: true }), 0, .56, .356, false); g.add(tag);
+    if (i === 1) g.add(sprite("biohaz", .26, .32, .95, 0));
+    return { g, lid, face: f, bounce: 0, body };
+  });
+  // items
+  const glass = (c) => new THREE.MeshPhysicalMaterial({ color: c, roughness: .08, transmission: .5, transparent: true, opacity: .8, thickness: .1, clearcoat: 1 });
+  const ITEMS = [
+    { name: "Used needle", bin: 0, why: "Needles always go in the sharps box, never in a bag. Don't recap!", make() { const g = new THREE.Group(); const b = mesh(new THREE.CylinderGeometry(.06, .06, .34, 18), glass(0xcff0ff), 0, 0, 0); b.rotation.z = Math.PI / 2; g.add(b); const pl = mesh(new THREE.CylinderGeometry(.025, .025, .18, 10), M(0xffffff), -.24, 0, 0); pl.rotation.z = Math.PI / 2; g.add(pl); put(g, mesh(new THREE.CylinderGeometry(.07, .07, .02, 18), M(0xffffff), -.33, 0, 0)).rotation.z = Math.PI / 2; const n = mesh(new THREE.CylinderGeometry(.004, .008, .2, 6), M(0xc8c8d0, { metalness: .8 }), .27, 0, 0); n.rotation.z = Math.PI / 2; g.add(n); put(g, mesh(new THREE.CylinderGeometry(.045, .045, .05, 14), M(0xff8cc3), .18, 0, 0)).rotation.z = Math.PI / 2; return g; } },
+    { name: "Scalpel blade", bin: 0, why: "Blades are sharps. Into the yellow box so nobody gets cut.", make() { const g = new THREE.Group(); g.add(mesh(rbox(.32, .04, .07, .015), M(0x6cc6ff), -.06, 0, 0)); const bl = mesh(new THREE.ConeGeometry(.045, .16, 3), M(0xe9e9f2, { metalness: .9, roughness: .15 }), .17, 0, 0); bl.rotation.z = -Math.PI / 2; bl.scale.z = .25; g.add(bl); return g; } },
+    { name: "Broken glass vial", bin: 0, why: "Broken glass can cut through a bag. It goes in sharps.", make() { const g = new THREE.Group(); g.add(mesh(new THREE.CylinderGeometry(.06, .06, .16, 16), glass(0xffd0e4), 0, 0, 0)); const sh = mesh(new THREE.ConeGeometry(.06, .1, 5), glass(0xffd0e4), 0, .12, 0); g.add(sh); g.add(mesh(new THREE.TetrahedronGeometry(.04), glass(0xffd0e4), .12, -.04, .05)); return g; } },
+    { name: "Used lancet", bin: 0, why: "Finger-prick lancets are tiny sharps. Still the sharps box.", make() { const g = new THREE.Group(); g.add(mesh(rbox(.16, .06, .06, .025), M(0xa58cff), 0, 0, 0)); put(g, mesh(new THREE.CylinderGeometry(.003, .006, .06, 6), M(0xc8c8d0, { metalness: .8 }), .1, 0, 0)).rotation.z = Math.PI / 2; return g; } },
+    { name: "Blood-soaked gauze", bin: 1, why: "Anything soaked with blood is biohazard, so it goes in the red bag bin.", make() { const g = new THREE.Group(); g.add(mesh(rbox(.3, .06, .26, .03), M(0xffffff, { clearcoat: .1, roughness: .9 }), 0, 0, 0)); const b = mesh(new THREE.CircleGeometry(.08, 18), new THREE.MeshBasicMaterial({ color: 0xd61f45 }), .02, .034, 0, false); b.rotation.x = -Math.PI / 2; b.scale.set(1.2, .8, 1); g.add(b); return g; } },
+    { name: "Used blood bag", bin: 1, why: "Blood bags are biohazard waste. Red bin.", make() { const g = new THREE.Group(); g.add(mesh(rbox(.26, .05, .34, .03), glass(0xff6b86), 0, 0, 0)); put(g, mesh(new THREE.CylinderGeometry(.01, .01, .2, 6), M(0xffffff), 0, 0, .25)).rotation.x = Math.PI / 2; return g; } },
+    { name: "Bloody gloves", bin: 1, why: "Gloves with blood on them are biohazard. Clean gloves can go in general.", make() { const g = new THREE.Group(); const gm = M(0x9fd8ff, { roughness: .5 }); g.add(mesh(rbox(.16, .05, .2, .02), gm, 0, 0, 0)); [-.05, -.017, .017, .05].forEach((x) => put(g, mesh(new THREE.CapsuleGeometry(.016, .08, 3, 8), gm, x, 0, -.15)).rotation.x = Math.PI / 2); const b = mesh(new THREE.CircleGeometry(.05, 14), new THREE.MeshBasicMaterial({ color: 0xd61f45 }), .03, .028, .02, false); b.rotation.x = -Math.PI / 2; g.add(b); return g; } },
+    { name: "Juice box", bin: 2, why: "No blood, no sharps: a juice box is general waste.", make() { const g = new THREE.Group(); g.add(mesh(rbox(.18, .26, .12, .03), M(0xff8cc3), 0, .08, 0)); g.add(mesh(new THREE.CylinderGeometry(.008, .008, .12, 6), M(0xffffff), .04, .26, 0)); const f = face(.28); f.position.set(0, .09, .065); g.add(f); return g; } },
+    { name: "Paper cup", bin: 2, why: "A clean paper cup is general waste.", make() { const g = new THREE.Group(); g.add(mesh(new THREE.CylinderGeometry(.09, .065, .2, 20), M(0xffffff), 0, .05, 0)); g.add(mesh(new THREE.CylinderGeometry(.092, .085, .05, 20), M(0x6cc6ff), 0, .1, 0)); const f = face(.26); f.position.set(0, .03, .082); g.add(f); return g; } },
+    { name: "Candy wrapper", bin: 2, why: "Wrappers are everyday rubbish. General bin.", make() { const g = new THREE.Group(); const c = mesh(new THREE.SphereGeometry(.08, 18, 12), M(0xffd25a), 0, 0, 0); c.scale.set(1.3, .8, .8); g.add(c); for (const sx of [-1, 1]) { const e = mesh(new THREE.ConeGeometry(.06, .1, 10), M(0xffd25a), sx * .14, 0, 0); e.rotation.z = sx * Math.PI / 2; g.add(e); } return g; } },
+    { name: "Banana peel", bin: 2, why: "Food scraps go in general (or compost where there is one).", make() { const g = new THREE.Group(); for (let k = 0; k < 3; k++) { const p = mesh(new THREE.CapsuleGeometry(.03, .18, 4, 8), M(0xffe066), Math.cos(k * 2.1) * .05, 0, Math.sin(k * 2.1) * .05); p.rotation.set(Math.PI / 2, 0, k * 2.1); p.rotation.x = 1.3; g.add(p); } return g; } },
+  ];
+  const ROUND = 16;
+  const order = []; { const pool = [...ITEMS.keys()]; for (let k = 0; k < ROUND; k++) order.push(pool[(k * 7 + Math.floor(Math.random() * ITEMS.length)) % ITEMS.length]); }
+  const live = []; const sparkle = new Pool(scene, STAR, 70, true); const puffs = new Pool(scene, SOFT, 30);
+  const tag = hud.extra("", "tag3d"); tag.hidden = true;
+  const binsUI = hud.extra(BINS.map((b, i) => `<button class="b${i}" data-bin="${i}">${b.name}<small>${["needles, blades, glass", "blood, body fluids", "everyday rubbish"][i]}</small></button>`).join(""), "bins");
+  binsUI.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => sortFront(+b.dataset.bin)));
+  const S = { spawned: 0, t: 0, speed: .55, gap: 2.6, correct: 0, wrong: 0, missed: 0, streak: 0, best: 0, swipe: null, done: false };
+  hud.meter("sorted", "Sorted", 0, "0 / " + ROUND, "#2fb36d"); hud.meter("streak", "Streak", 0, "0", "#ffb300");
+  function spawn() {
+    const def = ITEMS[order[S.spawned++]]; const obj = def.make(); obj.traverse((o) => { if (o.isMesh) o.castShadow = true; });
+    obj.position.set(rand(-.15, .15), 1.08, -6); obj.rotation.y = rand(-.6, .6); scene.add(obj);
+    const ring = mesh(new THREE.RingGeometry(.22, .27, 32), new THREE.MeshBasicMaterial({ color: 0xffd25a, transparent: true, opacity: 0, depthWrite: false }), 0, -.07, 0, false); ring.rotation.x = -Math.PI / 2; obj.add(ring);
+    live.push({ def, obj, ring, state: "belt", t: 0 });
+  }
+  function front() { return live.find((it) => it.state === "belt"); }
+  function sortFront(bin) {
+    if (S.done) return; const it = front(); if (!it) return; Sound.ac();
+    it.state = "fly"; it.t = 0; it.from = it.obj.position.clone(); it.bin = bin; it.to = new THREE.Vector3(BINS[bin].x * .9, .75, 1.0); Sound.tone(500, .12, "sine", .08, 1.6);
+    const ok = bin === it.def.bin; it.ok = ok;
+    if (ok) { S.correct++; S.streak++; S.best = Math.max(S.best, S.streak); hud.toast(S.streak >= 3 ? `Streak x${S.streak}` : "Correct!", S.streak >= 3 ? "gold" : "good"); }
+    else { S.wrong++; S.streak = 0; hud.toast("Oops, " + BINS[it.def.bin].name.toLowerCase() + "!", "bad", it.def.why); buzz([40, 30, 40]); }
+  }
+  const P = {
+    scene, camera, minHFov: 70, baseV: 58,
+    begin() { spawn(); hud.coach("?", "Sort the waste", "Tap a bin button, swipe left / down / right, or use ← ↓ →.", "swipe"); },
+    down(p) { S.swipe = p; },
+    up(p) {
+      if (!S.swipe) return; const dx = p.x - S.swipe.x, dy = p.y - S.swipe.y; S.swipe = null;
+      if (Math.hypot(dx, dy) < 30) { // tap: which bin was tapped?
+        const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(p.nx * 2 - 1, -(p.ny * 2 - 1)), camera);
+        binObjs.forEach((b, i) => { if (ray.intersectObject(b.g, true).length) sortFront(i); }); return;
+      }
+      if (Math.abs(dx) > Math.abs(dy)) sortFront(dx < 0 ? 0 : 2); else if (dy > 0) sortFront(1);
+    },
+    key(k, down) { if (!down) return false; const m = { ArrowLeft: 0, ArrowDown: 1, ArrowRight: 2, 1: 0, 2: 1, 3: 2 }; if (k in m) { sortFront(m[k]); return true; } return false; },
+    update(dt, t) {
+      beltTex.offset.y -= dt * S.speed / .64;
+      S.t += dt; const last = live[live.length - 1];
+      if (S.spawned < ROUND && (!last || last.obj.position.z > -6 + S.gap)) spawn();
+      S.speed = .55 + Math.min(S.correct, 12) * .045; S.gap = Math.max(1.5, 2.6 - S.correct * .07);
+      const fr = front();
+      for (const it of live) {
+        if (it.state === "belt") {
+          it.obj.position.z += S.speed * dt; it.obj.position.y = 1.08 + Math.abs(Math.sin(t * 6 + it.obj.id)) * .015;
+          it.ring.material.opacity = it === fr ? .7 + Math.sin(t * 8) * .3 : 0;
+          if (it.obj.position.z > .25) { it.state = "fall"; it.t = 0; S.missed++; S.streak = 0; hud.toast("Missed!", "bad", it.def.name + " → " + BINS[it.def.bin].name); Sound.bad(); }
+        } else if (it.state === "fly") {
+          it.t += dt / .5; const k = Math.min(1, it.t); it.obj.position.lerpVectors(it.from, it.to, k); it.obj.position.y += Math.sin(k * Math.PI) * .7; it.obj.rotation.x += dt * 8; it.obj.scale.setScalar(1 - k * .4); it.ring.material.opacity = 0;
+          if (k >= 1) { it.state = "gone"; it.obj.visible = false; const b = binObjs[it.bin]; b.bounce = 1; b.face.userData.setMood(it.ok ? "happy" : "worried"); setTimeout(() => b.face.userData.setMood("happy"), 900);
+            if (it.ok) { Sound.good(); for (let i = 0; i < 12; i++) sparkle.spawn(it.to.clone(), new THREE.Vector3(rand(-1.2, 1.2), rand(1, 2.5), rand(-.5, .5)), { life: .8, s0: .09, s1: .02, c0: [0xffd25a, 0xffffff, 0x8ff0b0][i % 3], g: -4 }); } else Sound.bad(); }
+        } else if (it.state === "fall") {
+          it.t += dt; it.obj.position.z += dt * 1.2; it.obj.position.y = Math.max(.05, 1.08 - it.t * it.t * 5); it.obj.rotation.z += dt * 5; it.ring.material.opacity = 0;
+          if (it.t > 1.2) { it.state = "gone"; puffs.spawn(it.obj.position.clone(), new THREE.Vector3(0, .5, 0), { life: .6, s0: .2, s1: .5, c0: 0xffffff }); it.obj.visible = false; }
+        }
+      }
+      binObjs.forEach((b) => { b.bounce = Math.max(0, b.bounce - dt * 3); b.lid.position.y = .76 + Math.sin(b.bounce * Math.PI) * .12; b.lid.rotation.x = -Math.sin(b.bounce * Math.PI) * .4; b.g.scale.y = 1 - Math.sin(b.bounce * Math.PI * 2) * .04; });
+      if (fr) { const p = project(fr.obj.position.clone().add(new THREE.Vector3(0, .25, 0)), camera); tag.hidden = false; tag.textContent = fr.def.name; tag.style.left = p.x + "px"; tag.style.top = p.y + "px"; } else tag.hidden = true;
+      const done = live.filter((x) => x.state === "gone").length;
+      hud.meter("sorted", "Sorted", (S.correct) / ROUND, S.correct + " / " + ROUND); hud.meter("streak", "Streak", Math.min(1, S.streak / 8), S.streak + "");
+      if (!S.done && done >= ROUND) {
+        S.done = true; Sound.win(); confetti(sparkle, new THREE.Vector3(0, 1.4, .6), 50);
+        const stars = S.correct >= 15 ? 3 : S.correct >= 12 ? 2 : S.correct >= 8 ? 1 : 0;
+        finish({ stars, title: stars ? "Ward waste, sorted!" : "Let's try that again", stats: [["Correct", S.correct + "/" + ROUND], ["Best streak", S.best], ["Missed", S.missed]], note: S.wrong + S.missed ? "Rule of thumb: if it can cut or poke, sharps. If it has blood on it, biohazard. Everything else, general." : "", delay: 900 });
+      }
+      sparkle.update(dt); puffs.update(dt);
+    },
+    idle(dt) { beltTex.offset.y -= dt * .3; },
+    dispose() { live.forEach((x) => scene.remove(x.obj)); },
+  };
+  return P;
+}
+
+/* ================= catalogue ================= */
+const DEFS = [
+  { id: "fire", title: "Fire Drill: P.A.S.S.", skill: "Fire safety", ward: "Before Ward 1 · General Hospital", art: "a1", img: "extinguisher", side: "glow", letters: ["P", "A", "S", "S"], badge: "Fire Warden", perk: "Next ward: +1 bomb", build: buildFire,
+    blurb: "A bin is burning in Room 3. Pull, Aim, Squeeze and Sweep in first person until it's out.",
+    brief: "A waste bin caught fire in Room 3. Everyone is safe and the alarm is pulled. You're standing a safe 2 to 3 metres back with an ABC extinguisher.",
+    howto: ["<b>P</b>ull: drag the yellow pin up.", "<b>A</b>im: move the circle onto the base of the fire until it turns green.", "<b>S</b>queeze: press and hold (or Space).", "<b>S</b>weep: keep holding and move side to side across the base."],
+    learn: ["<b>P.A.S.S.</b> Pull the pin, Aim low, Squeeze the handle, Sweep side to side.", "Aim at the <b>base</b>. Spraying the flames wastes agent.", "A small extinguisher lasts about <b>10 to 20 seconds</b>. If the fire isn't out, leave and close the door (R.A.C.E.: Rescue, Alarm, Contain, Extinguish)."] },
+  { id: "hands", title: "Scrub Squad", skill: "Hand hygiene", ward: "Before Ward 6 · Care Clinic", art: "a2", img: "germ-1", side: "germ-3", letters: ["2", "0", "s"], badge: "Germ Buster", perk: "Next ward: microbes start weaker", build: buildHands,
+    blurb: "Pop the germs off both hands with the real WHO hand-washing moves, for at least 20 seconds.",
+    brief: "You're about to see patients. Germs are hiding on your palms, backs, between your fingers, on your thumbs and fingertips. Each scrub move cleans a different spot.",
+    howto: ["Tap the soap pump twice.", "Each step shows a move: circles, side to side, up and down, or fast taps.", "Rinse with a long press, then dry and turn the tap off with the towel."],
+    learn: ["Scrub for <b>at least 20 seconds</b>, about two rounds of Happy Birthday.", "Every part counts: <b>palms, backs, between fingers, thumbs, fingertips</b>.", "Dry with a paper towel and <b>use it to turn the tap off</b>, so clean hands stay clean."] },
+  { id: "cpr", title: "Keep the Beat", skill: "Hands-only CPR", ward: "Before Ward 11 · Emergency", art: "a3", img: "heart", side: "plus", letters: ["30", "2"], badge: "Heart Keeper", perk: "Next ward: Second wind ready", build: buildCPR,
+    blurb: "Patch the training plush collapsed. Check, call, then push to the beat: 100 to 120 a minute.",
+    brief: "Patch, the ward's training plush, is lying on the mat and won't wake up. Check, call for help, then keep Patch's heart going until the AED arrives.",
+    howto: ["Tap Patch twice to check for a response.", "Call Code Blue and send for the AED.", "Tap to the pulsing ring: 30 pushes, 2 breaths (hold), 30 pushes."],
+    learn: ["<b>Check, Call, Compress.</b> Don't wait: start pushing as soon as help is called.", "Push hard and fast in the <b>centre of the chest</b>, <b>100 to 120 per minute</b>, about 5 to 6 cm deep on an adult.", "<b>30 pushes, 2 breaths</b> if you're trained. Untrained? Hands-only CPR still saves lives."] },
+  { id: "sort", title: "Safe Sort", skill: "Sharps & waste", ward: "Before Ward 16 · Side wards", art: "a4", img: "biohaz", side: "bandage", letters: ["←", "↓", "→"], badge: "Safety Star", perk: "Next ward: +1 striped power", build: buildSort,
+    blurb: "Waste rolls down the belt. Sharps, biohazard or general? Sort it before it falls off.",
+    brief: "The ward's waste belt is rolling. Every item needs the right bin. It speeds up as your streak grows.",
+    howto: ["Tap a bin button, swipe left / down / right, or use the arrow keys.", "<b>Sharps</b>: anything that can cut or poke.", "<b>Biohazard</b>: blood and body fluids. <b>General</b>: everything else."],
+    learn: ["If it can <b>cut or poke</b>, it goes in the yellow <b>sharps</b> box. Never recap a needle.", "Anything with <b>blood or body fluids</b> goes in the red <b>biohazard</b> bin.", "Clean everyday rubbish goes in <b>general</b>. Overfilling or mixing bins puts the cleaners at risk."] },
+];
+function renderCards() {
+  const best = store.get("best", {});
+  $("#cards").innerHTML = DEFS.map((d) => `
+    <article class="card">
+      <div class="art ${d.art}"><img class="main" src="${ASSETS[d.img]}" alt=""><img class="side" src="${ASSETS[d.side]}" alt="" style="right:14px;top:12px">
+        <div class="letters">${d.letters.map((l) => `<b>${l}</b>`).join("")}</div></div>
+      <div class="body"><div class="ward">${d.ward}</div><h2>${d.title}</h2><p>${d.blurb}</p>
+        <div class="row"><span class="stars" aria-label="Best ${best[d.id] || 0} of 3 stars">${[0, 1, 2].map((i) => `<span class="${i < (best[d.id] || 0) ? "on" : ""}">★</span>`).join("")}</span>
+        <button class="sc-cta" data-go="${d.id}">Play</button></div></div>
+    </article>`).join("");
+  document.querySelectorAll("[data-go]").forEach((b) => (b.onclick = () => start(DEFS.find((d) => d.id === b.dataset.go))));
+}
+renderCards();
+const want = (location.hash || "").slice(1); const pre = DEFS.find((d) => d.id === want); if (pre) start(pre);
+addEventListener("hashchange", () => { const d = DEFS.find((x) => x.id === location.hash.slice(1)); if (d) start(d); });
+})();
+</script>
