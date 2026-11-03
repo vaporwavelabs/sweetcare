@@ -3,3 +3,7 @@ node_modules/
 .github_repo
 .env
 .env.*
+
+# Vercel build output must be produced by Vercel, never committed
+.vercel/
+.output/
