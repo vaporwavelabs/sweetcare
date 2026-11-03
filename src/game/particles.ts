@@ -5,10 +5,18 @@ export type ParticleKind = Kind | "imp";
 export interface Body {
   x: number;
   y: number;
+  /** Depth toward the player, in px. 0 is the board plane, positive is nearer the glass. */
+  z: number;
   vx: number;
   vy: number;
+  vz: number;
   angle: number;
   omega: number;
+  /** Tumble around the horizontal axis, so a candy flips toward and away from the camera. */
+  tilt: number;
+  tiltSpeed: number;
+  /** 0-1 extra glow, fed by how deep the cascade was. */
+  heat: number;
   radius: number;
   life: number;
   age: number;
@@ -21,7 +29,7 @@ export interface Body {
 }
 
 /** How each candy behaves once it leaves the board. */
-const MATERIAL: Record<ParticleKind, Omit<Body, "x" | "y" | "vx" | "vy" | "angle" | "omega" | "age" | "kind">> = {
+const MATERIAL: Record<ParticleKind, Omit<Body, "x" | "y" | "z" | "vx" | "vy" | "vz" | "angle" | "omega" | "tilt" | "tiltSpeed" | "heat" | "age" | "kind">> = {
   heart: { radius: 13, life: 1.35, restitution: 0.72, drag: 0.85, gravity: 520, mass: 0.55, flutter: 0 },
   cross: { radius: 14, life: 1.2, restitution: 0.28, drag: 0.35, gravity: 1280, mass: 1.45, flutter: 0 },
   pill: { radius: 12, life: 1.35, restitution: 0.55, drag: 0.45, gravity: 860, mass: 0.85, flutter: 0 },
@@ -61,6 +69,24 @@ const MATERIAL: Record<ParticleKind, Omit<Body, "x" | "y" | "vx" | "vy" | "angle
   imp: { radius: 12, life: 1.7, restitution: 0.86, drag: 0.3, gravity: 980, mass: 0.7, flutter: 0 },
 };
 
+/** Camera distance for the fake perspective. A body at z = FOCAL / 2 draws twice as big. */
+export const FOCAL = 420;
+/** How far toward the viewer a body may fly, and how far back into the board. */
+const NEAR = 170;
+const FAR = -140;
+
+/** Perspective scale for a depth. */
+export function depthScale(z: number): number {
+  return FOCAL / Math.max(60, FOCAL - z);
+}
+
+export interface SpawnOptions {
+  z?: number;
+  vz?: number;
+  tiltSpeed?: number;
+  heat?: number;
+}
+
 export class ParticleWorld {
   bodies: Body[] = [];
   width = 300;
@@ -71,20 +97,30 @@ export class ParticleWorld {
     this.height = Math.max(1, height);
   }
 
-  spawn(kind: ParticleKind, x: number, y: number, vx: number, vy: number, omega = 0) {
-    if (this.bodies.length > 96) this.bodies.splice(0, this.bodies.length - 96);
+  spawn(kind: ParticleKind, x: number, y: number, vx: number, vy: number, omega = 0, options: SpawnOptions = {}) {
+    if (this.bodies.length > 110) this.bodies.splice(0, this.bodies.length - 110);
     const spec = MATERIAL[kind];
     this.bodies.push({
       ...spec,
       kind,
       x,
       y,
+      z: options.z ?? 0,
       vx,
       vy,
+      vz: options.vz ?? 0,
       angle: 0,
       omega,
+      tilt: 0,
+      tiltSpeed: options.tiltSpeed ?? omega * 0.6,
+      heat: options.heat ?? 0,
       age: 0,
     });
+  }
+
+  /** Bodies sorted far to near, the order to paint them in. */
+  painterOrder(): Body[] {
+    return [...this.bodies].sort((a, b) => a.z - b.z);
   }
 
   step(dt: number) {
@@ -99,10 +135,16 @@ export class ParticleWorld {
       const damp = Math.exp(-body.drag * stepDt);
       body.vx *= damp;
       body.vy *= damp;
+      // Depth has no gravity, only air: candies thrown at the glass slow and drift back down.
+      body.vz = body.vz * damp - body.z * 1.6 * stepDt;
       body.omega *= Math.exp(-body.drag * 0.5 * stepDt);
+      body.tiltSpeed *= Math.exp(-body.drag * 0.35 * stepDt);
       body.x += body.vx * stepDt;
       body.y += body.vy * stepDt;
+      body.z += body.vz * stepDt;
       body.angle += body.omega * stepDt;
+      body.tilt += body.tiltSpeed * stepDt;
+      body.heat *= Math.exp(-1.4 * stepDt);
       this.contain(body);
     }
     const n = list.length;
@@ -110,30 +152,43 @@ export class ParticleWorld {
       const a = list[i]!;
       for (let j = i + 1; j < n; j++) {
         const b = list[j]!;
+        // Spheres in 3D: two candies only touch when they are at about the same depth too.
         const dx = b.x - a.x;
         const dy = b.y - a.y;
+        const dz = b.z - a.z;
         const min = a.radius + b.radius;
-        const dist2 = dx * dx + dy * dy;
+        const dist2 = dx * dx + dy * dy + dz * dz;
         if (dist2 >= min * min || dist2 < 1e-4) continue;
         const dist = Math.sqrt(dist2);
         const nx = dx / dist;
         const ny = dy / dist;
+        const nz = dz / dist;
         const overlap = min - dist;
         const share = 1 / (a.mass + b.mass);
         a.x -= nx * overlap * b.mass * share;
         a.y -= ny * overlap * b.mass * share;
+        a.z -= nz * overlap * b.mass * share;
         b.x += nx * overlap * a.mass * share;
         b.y += ny * overlap * a.mass * share;
-        const rel = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny;
+        b.z += nz * overlap * a.mass * share;
+        const rel = (b.vx - a.vx) * nx + (b.vy - a.vy) * ny + (b.vz - a.vz) * nz;
         if (rel > 0) continue;
         const bounce = Math.min(a.restitution, b.restitution);
         const impulse = (-(1 + bounce) * rel) / (1 / a.mass + 1 / b.mass);
         a.vx -= (impulse * nx) / a.mass;
         a.vy -= (impulse * ny) / a.mass;
+        a.vz -= (impulse * nz) / a.mass;
         b.vx += (impulse * nx) / b.mass;
         b.vy += (impulse * ny) / b.mass;
+        b.vz += (impulse * nz) / b.mass;
         a.omega += impulse / (a.mass * 40);
         b.omega -= impulse / (b.mass * 40);
+        a.tiltSpeed += (impulse * nz) / (a.mass * 30);
+        b.tiltSpeed -= (impulse * nz) / (b.mass * 30);
+        // A hard knock flares both candies.
+        const flare = Math.min(0.5, -rel / 900);
+        a.heat = Math.min(1, a.heat + flare);
+        b.heat = Math.min(1, b.heat + flare);
       }
     }
     this.bodies = list.filter((body) => body.age < body.life);
@@ -141,6 +196,13 @@ export class ParticleWorld {
 
   private contain(body: Body) {
     const r = body.radius;
+    if (body.z > NEAR) {
+      body.z = NEAR;
+      body.vz = -Math.abs(body.vz) * body.restitution;
+    } else if (body.z < FAR) {
+      body.z = FAR;
+      body.vz = Math.abs(body.vz) * body.restitution;
+    }
     if (body.x < r) {
       body.x = r;
       body.vx = Math.abs(body.vx) * body.restitution;

@@ -3,7 +3,7 @@ import { LEVELS, type Goal, type JellyPattern, type LevelDef } from "./levels.ts
 import { formatGrid, parseGrid, type CellSpec } from "./layout.ts";
 import { SHAPES, shapesFor } from "./shapes.ts";
 import { hashText, shiftById, type ShiftId } from "./shifts.ts";
-import { targetRate, tune } from "./simulate.ts";
+import { targetRate, tune, wardMovesFloor } from "./simulate.ts";
 
 const HOSPITAL: Kind[] = ["heart", "cross", "pill", "bandage", "nurse", "kit"];
 const CLINIC: Kind[] = ["heart", "cross", "kit", "teddy", "diaper", "bottle"];
@@ -69,6 +69,17 @@ export function generateWard(id: number, seed: number, shiftId: ShiftId = "fully
   return structuredClone(level);
 }
 
+/**
+ * The refill helper sets off a lot of cascades, so goals that were sized for a quiet board would
+ * be cleared in a handful of moves. Bigger goals keep a ward long enough to enjoy the chains,
+ * and the bot still trims moves to each ward's target win rate.
+ */
+const GOAL_LIFT = 1.6;
+
+function more(n: number, step = 1): number {
+  return Math.round((n * GOAL_LIFT) / step) * step;
+}
+
 function rollWardDef(id: number, seed: number, shiftId: ShiftId): LevelDef {
   const base = LEVELS[id - 1] ?? LEVELS[0]!;
   if (id <= 2 || base.bossHp) {
@@ -95,37 +106,37 @@ function rollWardDef(id: number, seed: number, shiftId: ShiftId): LevelDef {
   let wraps = 0;
 
   if (shift.id === "night-shift") {
-    goals = [{ type: "score", target: 7000 + id * 700 + (seed % 6) * 200 }];
+    goals = [{ type: "score", target: more(7000 + id * 700 + (seed % 6) * 200, 50) }];
   } else if (shift.id === "spill-risk") {
     jelly = jellyFor(rng);
     goals = [{ type: "jelly" }];
-    if (rng() < 0.45) goals.push({ type: "collect", kind: pick(rng, kinds), count: 16 + (seed % 5) });
+    if (rng() < 0.45) goals.push({ type: "collect", kind: pick(rng, kinds), count: more(16 + (seed % 5)) });
   } else {
     const family = id >= 7 ? seed % 6 : seed % 5;
     if (family === 0) {
-      goals = [{ type: "collect", kind: pick(rng, kinds), count: 26 + id * 2 + (seed % 4) }];
+      goals = [{ type: "collect", kind: pick(rng, kinds), count: more(26 + id * 2 + (seed % 4)) }];
     } else if (family === 1) {
       const a = pick(rng, kinds);
       const b = pick(rng, kinds.filter((kind) => kind !== a));
       goals = [
-        { type: "collect", kind: a, count: 16 + id + (seed % 4) },
-        { type: "collect", kind: b, count: 16 + id + ((seed >> 3) % 4) },
+        { type: "collect", kind: a, count: more(16 + id + (seed % 4)) },
+        { type: "collect", kind: b, count: more(16 + id + ((seed >> 3) % 4)) },
       ];
     } else if (family === 2) {
       jelly = jellyFor(rng);
       goals = [{ type: "jelly" }];
     } else if (family === 3) {
-      goals = [{ type: "score", target: 6000 + id * 700 }];
+      goals = [{ type: "score", target: more(6000 + id * 700, 50) }];
     } else if (family === 4) {
       jelly = pick(rng, ["bottom", "checker", "lower"] as const);
       goals = [
         { type: "jelly" },
-        { type: "collect", kind: pick(rng, kinds), count: 16 + id + (seed % 4) },
+        { type: "collect", kind: pick(rng, kinds), count: more(16 + id + (seed % 4)) },
       ];
     } else {
       wraps = 6 + Math.floor(id / 2) + (seed % 3);
       goals = [{ type: "wraps" }];
-      if (rng() < 0.5) goals.push({ type: "collect", kind: pick(rng, kinds), count: 14 + id + (seed % 4) });
+      if (rng() < 0.5) goals.push({ type: "collect", kind: pick(rng, kinds), count: more(14 + id + (seed % 4)) });
     }
   }
 
@@ -159,7 +170,7 @@ function rollWardDef(id: number, seed: number, shiftId: ShiftId): LevelDef {
   const lift = shift.id === "night-shift" ? 1.12 : 1;
   return {
     ...draft,
-    moves: tuned.moves,
+    moves: Math.max(wardMovesFloor(id, shift.id), tuned.moves),
     star2: Math.round(tuned.star2 * lift),
     star3: Math.round(tuned.star3 * lift),
   };

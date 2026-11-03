@@ -2,7 +2,7 @@ import { evolve, evolveAsync, wardPlan, type EvolveOptions } from "./evolve.ts";
 import { generateWard } from "./generator.ts";
 import type { LevelDef } from "./levels.ts";
 import type { ShiftId } from "./shifts.ts";
-import { targetRate } from "./simulate.ts";
+import { targetRate, wardMovesFloor } from "./simulate.ts";
 
 /**
  * Rolled wards (3 to 15, not bosses) are evolved for the player.
@@ -15,7 +15,7 @@ import { targetRate } from "./simulate.ts";
  */
 
 /** Bump when the engine changes so stale evolved wards are not reused. */
-const VERSION = 1;
+const VERSION = 2;
 const STORE = "sweet-care-evolved-v1";
 const KEEP = 16;
 
@@ -90,6 +90,7 @@ function shape(plain: LevelDef, evolved: LevelDef, options: EvolveOptions, gener
     shiftId: plain.shiftId,
     shiftLabel: plain.shiftLabel,
     boss: null,
+    moves: Math.max(wardMovesFloor(plain.id, plain.shiftId), evolved.moves),
     star2: Math.round(evolved.star2 * lift),
     star3: Math.round(evolved.star3 * lift),
     evolved: { generations, target: Math.round(options.target * 100) / 100, note: formLabel(offset) },

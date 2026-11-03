@@ -9,6 +9,9 @@ import {
   commitSwap,
   createBoard,
   diveFavor,
+  cascadeTuning,
+  openingAssist,
+  trackAssist,
   emptyCollected,
   eraseIds,
   findGroups,
@@ -164,11 +167,29 @@ describe("sweet care match-3", () => {
     assert.equal(comboWeight(3), 3);
     assert.equal(comboWeight(5), 5);
     assert.equal(comboWeight(8), 11);
-    assert.equal(diveFavor(1, true), 0);
-    assert.equal(diveFavor(3, false), 0);
-    assert.equal(diveFavor(3, true), 4);
+    assert.equal(diveFavor(3, 0), 0);
+    assert.equal(diveFavor(3, 2), 2);
+    assert.equal(diveFavor(22, 1), 4);
     assert.equal(comboLabel(6), "Deep dive!");
     assert.equal(comboLabel(7), "Faaah!");
     assert.equal(comboLabel(9), "Abyss!");
+  });
+  it("ramps the cascade helper down across the map", () => {
+    assert.ok(openingAssist(1) > 0);
+    assert.ok(openingAssist(4) >= openingAssist(12));
+    assert.equal(openingAssist(22), 0);
+    const early = cascadeTuning(4);
+    const late = cascadeTuning(22);
+    assert.ok(early.chain > late.chain);
+    assert.ok(early.every < late.every);
+    assert.ok(early.favor < late.favor, "lower favor rigs refills harder");
+    const state = { assist: 1, form: 0 };
+    trackAssist(state, 4, true);
+    assert.equal(state.assist, 0, "unused charges lapse at the end of a move");
+    trackAssist(state, 4, true);
+    assert.equal(state.assist, cascadeTuning(4).chain);
+    const dry = { assist: 0, form: 0 };
+    trackAssist(dry, 4, false);
+    assert.equal(dry.assist, cascadeTuning(4).chain, "a dry move arms the helper sooner");
   });
 });

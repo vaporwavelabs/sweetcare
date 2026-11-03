@@ -16,6 +16,7 @@ import {
   createBoard,
   diveFavor,
   trackAssist,
+  openingAssist,
   eraseIds,
   findHint,
   hasMove,
@@ -184,7 +185,7 @@ interface Model {
   flash: "win" | "summon" | null;
   countdown: string | null;
   dive: number;
-  assist: boolean;
+  assist: number;
   form: number;
   startedAt: number;
   maxCombo: number;
@@ -479,7 +480,8 @@ export function SweetCare() {
       const height = Math.max(1, rect.height);
       // Arena wards stack the stage over a full-width board. Sizing from the footer's own height would shrink it every pass.
       if (playing?.level.bossHp || playing?.level.encounter) {
-        const next = Math.max(160, Math.floor(width));
+        const room = arenaRoom(slot);
+        const next = Math.max(160, Math.floor(Math.min(room.width || width, room.height * (playing.level.cols / playing.level.rows))));
         setSide(next);
         setFrame({ x: 0, y: 0, w: 1, h: 1 });
         return;
@@ -498,6 +500,8 @@ export function SweetCare() {
     apply();
     const observer = new ResizeObserver(apply);
     observer.observe(slot);
+    const column = slot.closest(".column");
+    if (column) observer.observe(column);
     return () => observer.disconnect();
   }, [screen]);
 
@@ -812,7 +816,7 @@ export function SweetCare() {
       flash: null,
       countdown: null,
       dive: 0,
-      assist: false,
+      assist: openingAssist(level.id),
       form: 0,
       startedAt: Date.now(),
       maxCombo: 0,
@@ -1185,7 +1189,7 @@ export function SweetCare() {
       const kind = model.board[cell.r]?.[cell.c]?.kind;
       return kind ? [{ r: cell.r, c: cell.c, kind }] : [];
     });
-    if (bits.length > 0) particleRef.current?.burst(bits);
+    if (bits.length > 0) particleRef.current?.burst(bits, plan.combo);
     particleRef.current?.pop(bits, plan.combo);
     if (detonated.length > 0) particleRef.current?.detonate(detonated);
     const bigHit = plan.combo >= 3 || detonated.length > 0 || plan.removals.length >= 5;
@@ -1309,9 +1313,8 @@ export function SweetCare() {
       }
     }
     eraseIds(model.board, painted.dyingIds);
-    const spent = model.assist;
-    const fell = collapse(model.board, model.rng, model.level.kinds, diveFavor(model.level.id, spent), model.mask);
-    if (spent) model.assist = false;
+    const fell = collapse(model.board, model.rng, model.level.kinds, diveFavor(model.level.id, model.assist), model.mask);
+    if (model.assist > 0) model.assist -= 1;
     model.board = fell.board;
     const lift = new Map<number, number>();
     const born = new Set<number>();
@@ -2477,6 +2480,30 @@ function ComboCounter({ live, best }: { live: number; best: number }) {
   );
 }
 
+/**
+ * Height an arena board can take without pushing the power-up dock off screen. The stage above
+ * it keeps its minimum height; everything else in the column is measured as laid out.
+ */
+function arenaRoom(slot: HTMLElement): { width: number; height: number } {
+  const column = slot.closest(".column");
+  if (!(column instanceof HTMLElement)) return { width: 0, height: Infinity };
+  const style = window.getComputedStyle(column);
+  const gap = parseFloat(style.rowGap) || 0;
+  let used = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  for (const child of Array.from(column.children)) {
+    if (!(child instanceof HTMLElement) || child === slot) continue;
+    const position = window.getComputedStyle(child).position;
+    if (position === "absolute" || position === "fixed") continue;
+    if (child.classList.contains("play-stage")) {
+      used += (parseFloat(window.getComputedStyle(child).minHeight) || 0) + gap;
+      continue;
+    }
+    used += child.getBoundingClientRect().height + gap;
+  }
+  const width = column.clientWidth - (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+  return { width, height: Math.max(120, column.clientHeight - used) };
+}
+
 function Play({
   model, save, side, cell, slotRef, frame, boardRef, liquidRef, particleRef, onBack, onPause, onResume, onSound, onMusic, onHaptics, onProfile, onAid, onCancel, onArm, onAdvance, onRetry, onNext, onHome, onCollect, onPointerDown, onPointerMove, onPointerUp,
 }: {
@@ -2538,7 +2565,7 @@ function Play({
   const grid = (
     <>
       <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} holes={model.mask} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
-      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}${model.perks.armed ? " bedside" : ""}`} style={{ width: arena ? "100%" : side, height: boardH }}>
+      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}${model.perks.armed ? " bedside" : ""}`} style={{ width: side, height: boardH }}>
         <div className="board" ref={boardRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
           <div className={`pieces${model.animate ? " anim" : ""}`}>
             {model.view.map((tile) => {
@@ -2591,15 +2618,28 @@ function Play({
           <DocAvatar career={save.career} />
         </button>
       </div>
-      <section className="crush-hud">
-        <div className="level-slab">
+      <section className="crush-hud" aria-label="Ward status">
+        <div className="hud-level">
           <b className="lvl-num">{model.level.custom ? "✎" : model.level.id}</b>
           <div className="lvl-copy">
-            <div className="lvl-kicker">{model.level.shiftLabel ?? "Level"} {model.level.boss ? `· ${model.level.boss}` : ""}</div>
-            <div className="lvl-name">{model.level.name}</div>
+            <div className="lvl-line">
+              <span className="lvl-kicker">{model.level.boss || model.level.shiftLabel || "Ward"}</span>
+              <span className="lvl-name">{model.level.name}</span>
+            </div>
             <div className="bar" aria-hidden><span style={{ width: `${Math.round(frac * 100)}%` }} /></div>
           </div>
         </div>
+        <div className="hud-score">
+          <span className="kicker">Score</span>
+          <strong className="live-score" ref={scoreRef} key={model.score}>{model.score}</strong>
+          <span className="sr-only">Score {model.score}. Best {best}.</span>
+        </div>
+        <div className={`hud-moves${model.moves <= 5 && !arena ? " low" : ""}`}>
+          <span className="kicker">Moves</span>
+          <strong key={model.moves}>{model.moves}</strong>
+        </div>
+      </section>
+      <div className="hud-meta">
         {chips.length ? (
           <ul className="goal-chips" aria-label="Goals">
             {chips.map((chip) => (
@@ -2610,23 +2650,14 @@ function Play({
             ))}
           </ul>
         ) : null}
-        <div className="score-slab">
-          <div className="hs-col">
-            <span className="kicker">Score</span>
-            <strong className="live-score" ref={scoreRef} key={model.score}>{model.score}</strong>
-            <span className="capsule" aria-hidden><i className="seg red" /><i className="seg gold" /><i className="seg violet" /></span>
-            <span className="sr-only">Score {model.score}. Best {best}.</span>
-          </div>
-          <div className="mv-col"><span className="kicker">Moves:</span><strong>{model.moves}</strong></div>
-        </div>
-      </section>
-      {model.challenge && !model.outcome ? (
-        <ChallengeChip
-          challenge={model.challenge}
-          done={challengeMet(model.challenge, { won: false, maxCombo: model.maxCombo, movesLeft: model.moves, stars: 0, seconds: 0, boostersUsed: model.boostersUsed, destroyed: KINDS.reduce((sum, kind) => sum + model.collected[kind], 0) })}
-        />
-      ) : null}
-      <ComboCounter live={model.dive} best={model.maxCombo} />
+        <ComboCounter live={model.dive} best={model.maxCombo} />
+        {model.challenge && !model.outcome ? (
+          <ChallengeChip
+            challenge={model.challenge}
+            done={challengeMet(model.challenge, { won: false, maxCombo: model.maxCombo, movesLeft: model.moves, stars: 0, seconds: 0, boostersUsed: model.boostersUsed, destroyed: KINDS.reduce((sum, kind) => sum + model.collected[kind], 0) })}
+          />
+        ) : null}
+      </div>
       {boss ? (
         <div className={`boss-strip phase-${boss.phase}${model.sting > 0 ? " stung" : ""}`}>
           <div className="boss-meters">
@@ -2726,7 +2757,7 @@ function Play({
       {model.phase === "aim-blast" || model.phase === "aim-stripe" ? (
         <p className="aim-note">Tap a candy<button type="button" onClick={onCancel}>Cancel</button></p>
       ) : null}
-      {arena ? <div className="boss-footer" ref={slotRef}>{grid}</div> : null}
+      {arena ? <div className="boss-footer" ref={slotRef} style={{ width: side }}>{grid}</div> : null}
       <div className="kit-dock">
         {kitOpen ? (
           <div className="kit-pop" role="dialog" aria-label="Power up">
