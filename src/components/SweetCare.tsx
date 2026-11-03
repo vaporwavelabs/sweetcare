@@ -103,6 +103,8 @@ import { applyLayout } from "@/game/layout";
 import { LiquidBoard, type LiquidHandle } from "@/components/LiquidBoard";
 import { LevelCreator } from "@/components/LevelCreator";
 import { ParticleLayer, type ParticleHandle } from "@/components/ParticleLayer";
+import { Overworld } from "@/components/Overworld";
+import { readRoam, writeRoam } from "@/game/overworld";
 
 interface VTile {
   id: number;
@@ -327,6 +329,11 @@ export function SweetCare() {
   const curtainTimers = useRef<number[]>([]);
   const diskRef = useRef<SaveData>(defaultSave());
   const [screen, setScreen] = useState<Screen>("home");
+  const [mapView, setMapView] = useState<"roam" | "classic">(() => readRoam()?.view ?? "roam");
+  function pickMapView(view: "roam" | "classic") {
+    setMapView(view);
+    writeRoam({ view });
+  }
   const [caseFirst, setCaseFirst] = useState(false);
   const [save, setSave] = useState<SaveData>(defaultSave);
   const [tick, setTick] = useState(0);
@@ -1706,7 +1713,17 @@ export function SweetCare() {
           }}
         />
       ) : null}
-      {screen === "map" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} /> : null}
+      {screen === "map" && mapView === "roam" ? (
+        <Overworld
+          save={save}
+          onBack={() => setScreen("home")}
+          onPick={(id) => openLevel(id)}
+          onCollect={collectGift}
+          onClassic={() => pickMapView("classic")}
+          renderReveal={(id, close) => <CardReveal levelId={id} onClose={close} />}
+        />
+      ) : null}
+      {screen === "map" && mapView === "classic" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} onRoam={() => pickMapView("roam")} /> : null}
       {screen === "help" ? <Help onBack={() => setScreen("settings")} /> : null}
       {screen === "settings" ? (
         <OptionsScreen
@@ -1975,7 +1992,7 @@ function DevMenu({
   );
 }
 
-function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack: () => void; onPick: (id: number) => void; onCollect: (levelId: number) => void }) {
+function MapScreen({ save, onBack, onPick, onCollect, onRoam }: { save: SaveData; onBack: () => void; onPick: (id: number) => void; onCollect: (levelId: number) => void; onRoam?: () => void }) {
   const nextId = continueLevel(save);
   const preview = attemptFor(save, nextId);
   const rolled = nextId >= 3 && nextId <= 15 && !getLevel(nextId).bossHp;
@@ -2012,6 +2029,7 @@ function MapScreen({ save, onBack, onPick, onCollect }: { save: SaveData; onBack
       <button className="zoom-toggle" type="button" onClick={() => setZoomed((on) => !on)}>
         {zoomed ? "Whole island" : "Zoom to next"}
       </button>
+      {onRoam ? <button className="zoom-toggle" type="button" onClick={onRoam}>Walk the island</button> : null}
       <div className="island-wrap">
         <IslandCamera focusX={spot.x} focusY={spot.y} zoom={zoomed}>
           {MAP_SPOTS.map((pin) => {
