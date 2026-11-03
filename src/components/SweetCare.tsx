@@ -1,6 +1,6 @@
 import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { ChevronLeft, Star, Volume2, VolumeX } from "lucide-react";
+import { ChevronLeft, Coins, Gift, Pause, Star, Volume2, VolumeX } from "lucide-react";
 import { Cheer, CountUp, DocAvatar, portrait, ProfileScreen, SketchModel } from "@/components/Profile";
 import { applyRound, ACHIEVEMENTS, rankTitle } from "@/game/profile";
 import {
@@ -10,8 +10,10 @@ import {
   collapse,
   comboLabel,
   commitSwap,
+  countWraps,
   createBoard,
   diveFavor,
+  trackAssist,
   eraseIds,
   findHint,
   hasMove,
@@ -26,7 +28,9 @@ import {
   type Board,
   type ClearPlan,
   type Kind,
+  type Mask,
   type Pos,
+  type Power,
   type Rng,
   type Special,
 } from "@/game/engine";
@@ -38,10 +42,14 @@ import {
   countJelly,
   freshCollected,
   getLevel,
+  goalChips,
   goalFraction,
   goalsMet,
   journeyFor,
+  levelCells,
+  levelMask,
   makeJelly,
+  sceneFor,
   starsFor,
   wardsOpen,
   WARD_IDS,
@@ -49,9 +57,15 @@ import {
 } from "@/game/levels";
 import {
   setAudioPrefs,
+  setVolumes,
   sfxBad,
   sfxBossHit,
+  sfxBossPhase,
+  sfxBossStrike,
+  sfxBossWarn,
+  sfxInterrupt,
   sfxClick,
+  sfxCoins,
   sfxCrack,
   sfxDeep,
   sfxFaah,
@@ -71,11 +85,20 @@ import {
   unlockAudio,
 } from "@/game/audio";
 import { GIFT_CARDS, cardForLevel, rememberGift } from "@/game/cards";
+import { haptic, setHapticStrength, setHapticsPref } from "@/game/haptics";
+import { bossTierFor, createBoss, hitBoss, MOVE_LABEL, shoveBoss as shoveKaren, stepBoss, windupProgress, type BossEvent, type BossState } from "@/game/boss";
+import { makeGerm, stepGerm, woundGerm, type Germ } from "@/game/swarm";
+import { applyStamp, auditTargets, createEmergency, damageScale, drainFlood, EMERGENCY_TIP, floodCells, floodLevel, shock, SPILL_AT, SPILL_BITE, stepEmergency, type EmergencyEvent, type EmergencyState } from "@/game/emergency";
 import { generateWard } from "@/game/generator";
-import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
-import { shiftForDate } from "@/game/shifts";
+import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, resetProgress, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
+import { dayKey, shiftForDate } from "@/game/shifts";
+import { applyMotionPref, motionReduced, type Prefs } from "@/game/prefs";
+import { lossPayout, payWin, rewardsWaiting, spendFromBag, winPayout, type BoosterId, type Payout } from "@/game/rewards";
+import { OptionsScreen, RewardsScreen } from "@/components/Options";
 import { installErrorLog, note, readNotes, subscribeNotes, type Note } from "@/game/log";
+import { applyLayout } from "@/game/layout";
 import { LiquidBoard, type LiquidHandle } from "@/components/LiquidBoard";
+import { LevelCreator } from "@/components/LevelCreator";
 import { ParticleLayer, type ParticleHandle } from "@/components/ParticleLayer";
 
 interface VTile {
@@ -86,6 +109,7 @@ interface VTile {
   c: number;
   dying: boolean;
   born: boolean;
+  wrap: number;
 }
 
 interface FloatText {
@@ -115,6 +139,9 @@ function splitScore(cells: Pos[], board: Board, gained: number) {
 interface Model {
   level: LevelDef;
   board: Board;
+  /** Playable cells. Absent on a full rectangle. */
+  mask?: Mask;
+  wrapsTotal: number;
   jelly: boolean[][];
   jellyTotal: number;
   rng: Rng;
@@ -122,6 +149,9 @@ interface Model {
   moves: number;
   collected: Record<Kind, number>;
   boosters: { blast: number; stripe: number; aid: number };
+  /** Bag boosters brought into the ward. Spent after the free one. */
+  bagStart: { blast: number; stripe: number; aid: number };
+  payout: Payout | null;
   phase: Phase;
   selected: Pos | null;
   hint: [Pos, Pos] | null;
@@ -145,13 +175,20 @@ interface Model {
   shake: boolean;
   animate: boolean;
   view: VTile[];
-  bossHp: number;
-  bossBump: number;
-  bossNear: number;
-  bossLane: number;
-  bossDir: number;
-  bossSlow: number;
-  bossHot: number;
+  boss: BossState | null;
+  /** Tiles taped down by Karen's paperwork, by tile id, with seconds left. */
+  locks: Map<number, number>;
+  /** Tiles she is about to tape. Shown as a warning during the windup. */
+  marked: number[];
+  /** The ward emergency this boss fight runs during. */
+  emergency: EmergencyState | null;
+  /** Power pieces the auditor's stamp is aimed at. */
+  audited: number[];
+  /** The pause sheet is open. Input, boss pressure and the clock all stop. */
+  paused: boolean;
+  pausedAt: number;
+  /** Seconds left of the red hit flash on the stage. */
+  sting: number;
   playerHp: number;
   germs: Germ[];
   germLeft: number;
@@ -159,9 +196,8 @@ interface Model {
   heal: number;
 }
 
-type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "cast" | "dev";
+type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "rewards" | "cast" | "dev" | "creator";
 
-type Germ = { id: number; sprite: number; x: number; y: number; hp: number; max: number };
 
 const COLS = 6;
 
@@ -171,7 +207,13 @@ function formatClock(ms: number) {
 }
 
 function reducedMotion() {
-  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return motionReduced();
+}
+
+function applyPrefs(prefs: Prefs) {
+  setVolumes(prefs.sfxVolume, prefs.musicVolume);
+  setHapticStrength(prefs.hapticStrength);
+  applyMotionPref(prefs.motion);
 }
 
 function wait(ms: number) {
@@ -204,6 +246,7 @@ function readView(board: Board, dying: Set<number>, born: Set<number>, lift?: Ma
         c,
         dying: dying.has(tile.id),
         born: born.has(tile.id),
+        wrap: tile.wrap ?? 0,
       });
     }
   }
@@ -269,6 +312,7 @@ export function SweetCare() {
   const [cell, setCell] = useState(36);
   const [frame, setFrame] = useState({ x: 0, y: 0, w: 1, h: 1 });
   const [journeyId, setJourneyId] = useState(1);
+  const [creatorUid, setCreatorUid] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [logOpen, setLogOpen] = useState(false);
   const forcedOpen = useRef(0);
@@ -306,6 +350,8 @@ export function SweetCare() {
     diskRef.current = loaded;
     setSave(loaded);
     setAudioPrefs(loaded.sound, loaded.music);
+    setHapticsPref(loaded.haptics);
+    applyPrefs(loaded.prefs);
   }, []);
 
   useEffect(() => {
@@ -324,19 +370,22 @@ export function SweetCare() {
       const playing = modelRef.current;
       const width = Math.max(1, rect.width);
       const height = Math.max(1, rect.height);
-      if (playing?.level.bossHp) {
+      // Arena wards stack the stage over a full-width board. Sizing from the footer's own height would shrink it every pass.
+      if (playing?.level.bossHp || playing?.level.encounter) {
         const next = Math.max(160, Math.floor(width));
         setSide(next);
         setFrame({ x: 0, y: 0, w: 1, h: 1 });
         return;
       }
-      const next = Math.max(160, Math.floor(Math.min(rect.width, rect.height)));
+      const aspect = playing ? playing.level.rows / playing.level.cols : 1;
+      const next = Math.max(160, Math.floor(Math.min(rect.width, rect.height / aspect)));
+      const tall = next * aspect;
       setSide(next);
       setFrame({
         x: (width - next) / 2 / width,
-        y: (height - next) / 2 / height,
+        y: (height - tall) / 2 / height,
         w: next / width,
-        h: next / height,
+        h: tall / height,
       });
     };
     apply();
@@ -359,12 +408,14 @@ export function SweetCare() {
 
   function scheduleHint() {
     clearHint();
+    const delay = saveRef.current.prefs.hintDelay;
+    if (delay <= 0) return;
     hintRef.current = window.setTimeout(() => {
       const model = modelRef.current;
       if (!model || model.phase !== "idle" || model.outcome) return;
       model.hint = findHint(model.board);
       bump();
-    }, 7000);
+    }, delay * 1000);
   }
 
   function patchSave(recipe: (prev: SaveData) => SaveData, kind: "session" | "settings" | "checkpoint" = "session") {
@@ -379,6 +430,7 @@ export function SweetCare() {
           ...disk,
           sound: next.sound,
           music: next.music,
+          haptics: next.haptics,
           career: {
             ...disk.career,
             name: next.career.name,
@@ -391,6 +443,8 @@ export function SweetCare() {
           openedGifts: next.openedGifts ?? disk.openedGifts,
           loot: next.loot === true,
           decor: next.decor ?? [],
+          prefs: next.prefs,
+          wallet: next.wallet,
         };
         diskRef.current = stored;
         writeSave(stored);
@@ -430,6 +484,37 @@ export function SweetCare() {
       setAudioPrefs(next.sound, next.music);
       return next;
     }, "settings");
+  }
+
+  function toggleHaptics() {
+    sfxClick();
+    patchSave((prev) => {
+      const next = { ...prev, haptics: !prev.haptics };
+      setHapticsPref(next.haptics);
+      if (next.haptics) haptic("special");
+      return next;
+    }, "settings");
+  }
+
+  function setPrefs(patch: Partial<Prefs>) {
+    patchSave((prev) => {
+      const prefs = { ...prev.prefs, ...patch };
+      applyPrefs(prefs);
+      return { ...prev, prefs };
+    }, "settings");
+  }
+
+  function wipeProgress() {
+    patchSave((prev) => resetProgress(prev), "checkpoint");
+    setScreen("home");
+  }
+
+  /** Spend one booster. The free one goes first, then the bag pays. */
+  function drawBooster(model: Model, which: BoosterId) {
+    model.boosters[which] -= 1;
+    if (model.boosters[which] < model.bagStart[which]) {
+      patchSave((prev) => ({ ...prev, wallet: spendFromBag(prev.wallet, which) }), "settings");
+    }
   }
 
   function collectGift(levelId: number) {
@@ -514,7 +599,7 @@ export function SweetCare() {
     bump();
   }
 
-  function startLevel(id: number) {
+  function startLevel(id: number, custom?: LevelDef) {
     try {
       unlockAudio();
       sfxClick();
@@ -527,18 +612,21 @@ export function SweetCare() {
     const run = ++runRef.current;
     shuffles.current = 0;
     try {
-    const attempt = attemptFor(saveRef.current, id);
+    const attempt = custom ? { save: saveRef.current, seed: Math.floor(Math.random() * 2 ** 31), shiftId: "fully-staffed" as const } : attemptFor(saveRef.current, id);
     if (attempt.save !== saveRef.current) {
       saveRef.current = attempt.save;
       writeSave(attempt.save);
       setSave(attempt.save);
     }
-    const scripted = getLevel(id);
-    const level = scripted.bossHp || scripted.encounter || id >= 16
+    const scripted = custom ?? getLevel(id);
+    const level = custom || scripted.bossHp || scripted.encounter || id >= 16
       ? scripted
       : generateWard(id, attempt.seed, attempt.shiftId);
     const rng = mulberry32((attempt.seed ^ (id * 9973)) >>> 0);
-    const board = createBoard(rng, level.rows, level.cols, level.kinds);
+    const mask = levelMask(level);
+    const board = createBoard(rng, level.rows, level.cols, level.kinds, mask);
+    const cells = levelCells(level);
+    if (cells) applyLayout(board, cells);
     if (level.startSpecial) {
       const mid = board[Math.floor(level.rows / 2)]?.[Math.floor(level.cols / 2)];
       if (mid) mid.special = level.startSpecial;
@@ -547,13 +635,17 @@ export function SweetCare() {
     const model: Model = {
       level,
       board,
+      mask,
+      wrapsTotal: countWraps(board),
       jelly,
       jellyTotal: countJelly(jelly),
       rng,
       score: 0,
       moves: level.moves,
       collected: freshCollected(),
-      boosters: { blast: 1, stripe: 1, aid: 1 },
+      boosters: { blast: 1 + saveRef.current.wallet.bag.blast, stripe: 1 + saveRef.current.wallet.bag.stripe, aid: 1 + saveRef.current.wallet.bag.aid },
+      bagStart: { ...saveRef.current.wallet.bag },
+      payout: null,
       phase: "busy",
       selected: null,
       hint: null,
@@ -565,7 +657,7 @@ export function SweetCare() {
       flash: null,
       countdown: null,
       dive: 0,
-      assist: level.id >= 3,
+      assist: false,
       form: 0,
       startedAt: Date.now(),
       maxCombo: 0,
@@ -577,13 +669,14 @@ export function SweetCare() {
       shake: false,
       animate: false,
       view: [],
-      bossHp: level.bossHp ?? 0,
-      bossBump: 0,
-      bossNear: 0,
-      bossLane: 0.18,
-      bossDir: 1,
-      bossSlow: 0,
-      bossHot: 0,
+      boss: level.bossHp ? createBoss(level.bossHp, bossTierFor(level.id, level.bossHp), attempt.seed ^ level.id) : null,
+      locks: new Map(),
+      marked: [],
+      emergency: level.bossHp && level.emergency ? createEmergency(level.emergency) : null,
+      audited: [],
+      paused: false,
+      pausedAt: 0,
+      sting: 0,
       playerHp: 100,
       germs: [],
       germLeft: level.swarm?.count ?? 0,
@@ -591,10 +684,11 @@ export function SweetCare() {
       heal: 0,
     };
     if (level.swarm) {
-      model.germs.push(
-        { id: 1, sprite: 1, x: 22, y: 28, hp: level.swarm.hp, max: level.swarm.hp },
-        { id: 2, sprite: 3, x: 68, y: 14, hp: level.swarm.hp, max: level.swarm.hp },
-      );
+      const first = makeGerm(++seq.current, 0, level.swarm, false);
+      const second = makeGerm(++seq.current, 1, level.swarm, false);
+      first.y = 28;
+      second.y = 14;
+      model.germs.push(first, second);
       model.germLeft = Math.max(0, level.swarm.count - 2);
     }
     model.view = readView(board, new Set(), new Set(), reducedMotion() ? undefined : liftAll(board, -level.rows));
@@ -621,13 +715,54 @@ export function SweetCare() {
     startLevel(id);
   }
 
+  function pausePlay() {
+    const model = modelRef.current;
+    if (!model || model.paused || model.outcome || model.countdown) return;
+    model.paused = true;
+    model.pausedAt = Date.now();
+    clearHint();
+    sfxClick();
+    bump();
+  }
+
+  function resumePlay() {
+    const model = modelRef.current;
+    if (!model || !model.paused) return;
+    model.paused = false;
+    // Time spent on the pause sheet doesn't count toward the ward clock.
+    model.startedAt += Date.now() - model.pausedAt;
+    sfxClick();
+    scheduleHint();
+    bump();
+  }
+
+  useEffect(() => {
+    if (screen !== "play") return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" && event.key !== "p") return;
+      if (modelRef.current?.paused) resumePlay();
+      else pausePlay();
+    };
+    // A boss keeps walking in real time, so leaving the tab pauses the ward.
+    const onHide = () => {
+      if (document.visibilityState === "hidden") pausePlay();
+    };
+    window.addEventListener("keydown", onKey);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("visibilitychange", onHide);
+    };
+  });
+
   function leavePlay() {
+    const custom = modelRef.current?.level.custom;
     runRef.current += 1;
     clearHint();
     clearCurtain();
     stopCelebration();
     modelRef.current = null;
-    setScreen("map");
+    setScreen(custom ? "creator" : "map");
   }
 
   function goHome() {
@@ -657,27 +792,27 @@ export function SweetCare() {
     if (!swarm || model.germLeft <= 0) return;
     model.germLeft -= 1;
     const n = model.germKills + model.germs.length;
-    model.germs.push({
-      id: ++seq.current,
-      sprite: (n % 5) + 1,
-      x: 8 + (n % 4) * 22,
-      y: 4 + (n % 3) * 6,
-      hp: swarm.hp,
-      max: swarm.hp,
-    });
+    const germ = makeGerm(++seq.current, n, swarm, model.germLeft === 0);
+    model.germs.push(germ);
+    if (germ.kind === "mother") {
+      say(model, "Mother cell!");
+      sfxBossWarn();
+    }
   }
 
   function hurtGerm(model: Model, amount: number) {
     const swarm = model.level.swarm;
     if (!swarm || amount <= 0 || model.germs.length === 0) return;
     const lead = model.germs.reduce((best, germ) => (germ.y > best.y ? germ : best));
-    lead.hp -= amount;
-    lead.y = Math.max(-18, lead.y - 4);
-    if (lead.hp <= 0) {
+    const hit = woundGerm(lead, amount, () => ++seq.current, swarm);
+    particleRef.current?.impact(amount, lead.kind === "mother" ? "crit" : "hit");
+    haptic("boss-hit");
+    if (hit.dead) {
       model.germs = model.germs.filter((germ) => germ.id !== lead.id);
+      model.germs.push(...hit.buds);
       model.germKills += 1;
-      model.banner = "Fended off!";
-      if (model.germKills >= swarm.count) {
+      say(model, hit.buds.length ? "She split!" : "Fended off!", 800);
+      if (model.germLeft <= 0 && model.germs.length === 0) {
         window.setTimeout(() => {
           void finish(runRef.current);
         }, 420);
@@ -686,20 +821,138 @@ export function SweetCare() {
     bump();
   }
 
-  function woundBoss(model: Model, amount: number) {
-    if (!model.level.bossHp || model.bossHp <= 0 || amount <= 0) return;
-    model.bossHp = Math.max(0, model.bossHp - amount);
-    model.bossBump += 1;
-    model.bossHot = 1.35;
-    if (model.bossHp === 0) model.banner = "Karen is down!";
+  function woundBoss(model: Model, amount: number, big = false) {
+    const boss = model.boss;
+    if (!boss || boss.hp <= 0 || amount <= 0) return;
+    const wasExposed = Boolean(boss.action);
+    const { dealt, events } = hitBoss(boss, amount, big);
+    if (boss.guard > 0 && dealt === 0) particleRef.current?.impact(0, "guard");
+    else particleRef.current?.impact(dealt, wasExposed || big ? "crit" : "hit");
+    if (dealt > 0) haptic("boss-hit");
+    for (const event of events) applyBossEvent(model, event);
     bump();
   }
 
   function shoveBoss(model: Model, push: boolean) {
-    if (!model.level.bossHp || model.bossHp <= 0) return;
-    model.bossSlow = Math.max(model.bossSlow, push ? 2.8 : 2.4);
-    model.bossNear = Math.max(0, model.bossNear - (push ? 28 : 8));
+    if (!model.boss || model.boss.hp <= 0) return;
+    shoveKaren(model.boss, push);
     bump();
+  }
+
+  function loseRound(model: Model, banner: string) {
+    model.elapsed = Math.max(0, Date.now() - model.startedAt);
+    model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
+    model.outcome = "lose";
+    model.curtain = "card";
+    model.phase = "idle";
+    model.banner = banner;
+    sfxLose();
+    haptic("lose");
+    closeRound(model, false, model.elapsed);
+    bump();
+  }
+
+  /** A boss line on the board that clears itself, unless something newer replaced it. */
+  function say(model: Model, text: string, ms = 1100) {
+    model.banner = text;
+    window.setTimeout(() => {
+      const current = modelRef.current;
+      if (current?.banner === text) current.banner = null;
+      bump();
+    }, ms);
+  }
+
+  /** Karen's telegraphs and strikes, turned into board effects. */
+  function applyBossEvent(model: Model, event: BossEvent) {
+    if (event.type === "telegraph") {
+      sfxBossWarn();
+      if (event.move === "paperwork") {
+        const free: number[] = [];
+        for (const row of model.board) for (const tile of row) if (tile && !tile.special && !model.locks.has(tile.id)) free.push(tile.id);
+        const picked: number[] = [];
+        while (picked.length < event.power && free.length > 0) {
+          const index = Math.floor(model.rng() * free.length);
+          picked.push(free.splice(index, 1)[0]!);
+        }
+        model.marked = picked;
+      }
+      return;
+    }
+    if (event.type === "interrupt") {
+      model.marked = [];
+      say(model, "Interrupted!");
+      sfxInterrupt();
+      particleRef.current?.bossBurst("interrupt");
+      return;
+    }
+    if (event.type === "phase") {
+      model.marked = [];
+      say(model, event.phase === 1 ? "Karen is fuming!" : "Karen lost it!");
+      model.flash = "summon";
+      sfxBossPhase();
+      particleRef.current?.bossBurst("phase");
+      window.setTimeout(() => {
+        const current = modelRef.current;
+        if (current?.flash === "summon") current.flash = null;
+        bump();
+      }, 700);
+      return;
+    }
+    if (event.type === "down") {
+      model.marked = [];
+      model.locks.clear();
+      say(model, "Karen is down!");
+      haptic("power");
+      particleRef.current?.bossBurst("down");
+      return;
+    }
+    if (event.type === "heal") {
+      say(model, "She had a coffee");
+      particleRef.current?.impact(event.amount, "heal");
+      return;
+    }
+    if (event.type === "contact") {
+      model.playerHp = Math.max(0, model.playerHp - event.bite);
+      model.marked = [];
+      model.sting = 0.5;
+      model.shake = true;
+      say(model, "She grabbed the chart!");
+      sfxBad();
+      sfxBossStrike();
+      haptic("hurt");
+      window.setTimeout(() => {
+        const current = modelRef.current;
+        if (current) current.shake = false;
+      }, 300);
+      if (model.playerHp <= 0) loseRound(model, "Karen reached the icons");
+      return;
+    }
+    // A strike.
+    sfxBossStrike();
+    haptic("hurt");
+    if (event.move === "paperwork") {
+      const cells: Pos[] = [];
+      for (let r = 0; r < model.board.length; r++) {
+        for (let c = 0; c < model.board[0]!.length; c++) {
+          const tile = model.board[r]![c];
+          if (tile && model.marked.includes(tile.id)) {
+            model.locks.set(tile.id, 9);
+            cells.push({ r, c });
+          }
+        }
+      }
+      model.marked = [];
+      particleRef.current?.paper(cells);
+      say(model, "Taped down!");
+    } else if (event.move === "writeup") {
+      const taken = Math.min(event.power, Math.max(0, model.moves - 1));
+      model.moves -= taken;
+      model.sting = 0.45;
+      say(model, taken > 0 ? `Write-up! -${taken} move${taken > 1 ? "s" : ""}` : "Write-up!");
+    } else if (event.move === "charge") {
+      model.sting = 0.35;
+      say(model, "She charged!");
+    }
   }
 
   async function playPlan(run: number, plan: ClearPlan) {
@@ -727,6 +980,12 @@ export function SweetCare() {
         sfxOrbFly();
       }
     }
+    const detonated: { r: number; c: number; special: Power }[] = [];
+    for (const cell of plan.removals) {
+      const tile = model.board[cell.r]?.[cell.c];
+      if (tile?.special) detonated.push({ r: cell.r, c: cell.c, special: tile.special });
+      if (tile) model.locks.delete(tile.id);
+    }
     const painted = paintSpecials(model.board, plan);
     liquidRef.current?.splash(plan.removals, Math.min(2.4, 0.85 + plan.combo * 0.22));
     model.view = readView(model.board, new Set(painted.dyingIds), new Set(painted.bornIds));
@@ -734,7 +993,7 @@ export function SweetCare() {
     model.rolls = [];
     model.banner = plan.banner;
     model.dive = plan.combo;
-    model.shake = plan.removals.length >= 8 || plan.combo >= 6;
+    model.shake = saveRef.current.prefs.shake && (plan.removals.length >= 8 || plan.combo >= 6);
     const center = centroid(plan.removals);
     const floatId = ++seq.current;
     model.floats = [...model.floats.slice(-4), { id: floatId, text: `+${gained}`, r: center.r, c: center.c }];
@@ -743,23 +1002,38 @@ export function SweetCare() {
       return kind ? [{ r: cell.r, c: cell.c, kind }] : [];
     });
     if (bits.length > 0) particleRef.current?.burst(bits);
-    if (model.level.bossHp && plan.removals.length >= 3) {
+    particleRef.current?.pop(bits, plan.combo);
+    if (detonated.length > 0) particleRef.current?.detonate(detonated);
+    const bigHit = plan.combo >= 3 || detonated.length > 0 || plan.removals.length >= 5;
+    // The Overflow: every mopped jelly cell is a hit on Karen.
+    if (model.boss && model.emergency?.kind === "overflow" && jellyBroken > 0) woundBoss(model, jellyBroken * 2);
+    if (model.boss && plan.removals.length >= 3) {
       const hits = plan.removals.flatMap((cell) => {
         const kind = model.board[cell.r]?.[cell.c]?.kind;
         return kind ? [{ r: cell.r, c: cell.c, kind }] : [];
       });
       sfxBossHit();
+      const scaleOf = (kind: Kind) => 4 * damageScale(model.emergency, kind);
+      const hearts = hits.filter((hit) => hit.kind === "heart").length;
+      if (shock(model.emergency, hearts)) {
+        say(model, "Clear! Shocked back");
+        particleRef.current?.bossBurst("interrupt");
+        sfxInterrupt();
+        haptic("power");
+        woundBoss(model, 10, true);
+      }
       if (hits.length === 0 || reducedMotion() || !particleRef.current) {
-        woundBoss(model, hits.length * 4);
+        woundBoss(model, hits.reduce((sum, hit) => sum + scaleOf(hit.kind), 0), bigHit);
         shoveBoss(model, true);
       } else {
         sfxOrbFly();
         let landed = 0;
-        particleRef.current.bossFly(hits, 4, (damage) => {
+        particleRef.current.bossFly(hits, scaleOf, (damage) => {
           const current = modelRef.current;
           if (!current || current.outcome) return;
           landed += 1;
-          woundBoss(current, damage);
+          // The first orb of a big volley is the one that can break a windup.
+          woundBoss(current, damage, bigHit && landed === 1);
           shoveBoss(current, landed % 3 === 0);
           sfxOrbPop();
         });
@@ -823,6 +1097,9 @@ export function SweetCare() {
     }
     if (bones >= 3) sfxCrack();
     const summoned = plan.spawns.filter((spawn) => spawn.special === "bomb" || spawn.special === "rainbow");
+    if (model.shake || summoned.length > 0) haptic("power");
+    else if (plan.spawns.length > 0) haptic("special");
+    else haptic("match", plan.combo);
     if (summoned.length > 0) summonImps(model, summoned, 8, plan.combo === 7);
     else if (plan.combo === 7) {
       /* the faaah sting already started for this clear */
@@ -849,7 +1126,7 @@ export function SweetCare() {
     }
     eraseIds(model.board, painted.dyingIds);
     const spent = model.assist;
-    const fell = collapse(model.board, model.rng, model.level.kinds, diveFavor(model.level.id, spent));
+    const fell = collapse(model.board, model.rng, model.level.kinds, diveFavor(model.level.id, spent), model.mask);
     if (spent) model.assist = false;
     model.board = fell.board;
     const lift = new Map<number, number>();
@@ -879,6 +1156,11 @@ export function SweetCare() {
   }
 
   function closeRound(model: Model, won: boolean, elapsed: number) {
+    if (model.level.custom) {
+      model.rankedUp = false;
+      model.savedNow = false;
+      return;
+    }
     const prev = saveRef.current;
     const key = String(model.level.id);
     const destroyed = KINDS.reduce((sum, kind) => sum + model.collected[kind], 0);
@@ -901,80 +1183,124 @@ export function SweetCare() {
     );
     model.rankedUp = applied.rankedUp;
     model.savedNow = won;
+    const today = dayKey();
+    const payout = won
+      ? winPayout(prev.wallet, {
+          levelId: model.level.id,
+          stars: model.stars,
+          prevStars: prev.stars[key] ?? 0,
+          movesLeft: Math.max(0, model.moves),
+          boss: Boolean(model.level.bossHp || model.level.encounter === "microbe"),
+          today,
+        })
+      : lossPayout();
+    model.payout = payout;
     patchSave((current) => {
       const base = won ? releaseAttempt(recordWin(current, model.level.id, model.stars, model.score, elapsed), model.level.id) : current;
-      return { ...base, career: applied.career };
+      const wallet = won ? payWin(current.wallet, payout, today) : { ...current.wallet, coins: current.wallet.coins + payout.total, earned: current.wallet.earned + payout.total };
+      return { ...base, career: applied.career, wallet };
     }, won ? "checkpoint" : "session");
+    if (!won) patchSave((current) => current, "settings");
   }
 
   onBossTick.current = (dt, paint) => {
     const model = modelRef.current;
-    if (!model || model.outcome || model.countdown) return;
+    if (!model || model.outcome || model.countdown || model.paused) return;
+    model.sting = Math.max(0, model.sting - dt);
+    if (model.locks.size > 0) {
+      for (const [id, left] of model.locks) {
+        if (left - dt <= 0) model.locks.delete(id);
+        else model.locks.set(id, left - dt);
+      }
+    }
     if (model.level.encounter === "microbe" && model.level.swarm) {
       const swarm = model.level.swarm;
       while (model.germs.length < 3 && model.germLeft > 0) spawnGerm(model);
       for (const germ of [...model.germs]) {
-        germ.y += swarm.speed * dt;
-        if (germ.y < 84) continue;
-        model.playerHp = Math.max(0, model.playerHp - swarm.bite);
+        if (!stepGerm(germ, swarm, dt)) continue;
+        const bite = germ.kind === "mother" ? swarm.bite * 2 : swarm.bite;
+        model.playerHp = Math.max(0, model.playerHp - bite);
         model.germs = model.germs.filter((item) => item.id !== germ.id);
-        model.banner = "A microbe reached the ward";
+        say(model, "A microbe reached the ward");
+        model.sting = 0.4;
         sfxBad();
+        haptic("hurt");
         if (model.playerHp <= 0) {
-          model.elapsed = Math.max(0, Date.now() - model.startedAt);
-          model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
-          model.outcome = "lose";
-          model.curtain = "card";
-          model.phase = "idle";
-          model.banner = "The microbes got through";
-          sfxLose();
-          closeRound(model, false, model.elapsed);
-          bump();
+          loseRound(model, "The microbes got through");
           return;
         }
+        if (model.germLeft <= 0 && model.germs.length === 0 && model.phase === "idle") void finish(runRef.current);
       }
       if (paint) bump();
       return;
     }
-    if (!model.level.bossHp || model.bossHp <= 0) return;
-    model.bossSlow = Math.max(0, model.bossSlow - dt);
-    model.bossHot = Math.max(0, model.bossHot - dt);
-    const stride = model.bossSlow > 0 ? 0.04 : 0.18;
-    model.bossLane += model.bossDir * stride * dt;
-    if (model.bossLane <= 0) {
-      model.bossLane = 0;
-      model.bossDir = 1;
-    } else if (model.bossLane >= 1) {
-      model.bossLane = 1;
-      model.bossDir = -1;
+    const boss = model.boss;
+    if (!boss || boss.hp <= 0) return;
+    for (const event of stepBoss(boss, dt)) {
+      applyBossEvent(model, event);
+      if (model.outcome) return;
     }
-    const speed = model.bossSlow > 0 ? 1.4 : 7;
-    model.bossNear = Math.min(100, model.bossNear + speed * dt);
-    if (model.bossNear >= 98) {
-      model.playerHp = Math.max(0, model.playerHp - 20 * dt);
-      if (model.playerHp <= 0) {
-        model.elapsed = Math.max(0, Date.now() - model.startedAt);
-        model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
-        model.outcome = "lose";
-        model.curtain = "card";
-        model.phase = "idle";
-        model.banner = "Karen reached the icons";
-        sfxLose();
-        closeRound(model, false, model.elapsed);
-        bump();
-        return;
+    if (model.emergency) {
+      for (const event of stepEmergency(model.emergency, dt, boss.phase)) {
+        applyEmergencyEvent(model, event);
+        if (model.outcome) return;
       }
     }
     if (paint) bump();
   };
 
+  function applyEmergencyEvent(model: Model, event: EmergencyEvent) {
+    if (event.type === "flatline") {
+      model.playerHp = Math.max(0, model.playerHp - event.bite);
+      model.sting = 0.5;
+      say(model, "Flatline! Get those hearts in");
+      sfxBad();
+      haptic("hurt");
+      if (model.playerHp <= 0) loseRound(model, "The patient flatlined");
+      return;
+    }
+    if (event.type === "audit-warn") {
+      model.audited = auditTargets(model.board, model.rng);
+      if (model.audited.length) {
+        say(model, "Audit incoming! Use your powers");
+        sfxBossWarn();
+      }
+      return;
+    }
+    const hit = applyStamp(model.board, model.audited);
+    model.audited = [];
+    if (!hit.length) return;
+    say(model, hit.length > 1 ? "Stamped flat!" : "Stamped!");
+    sfxBossStrike();
+    haptic("hurt");
+    particleRef.current?.paper(hit);
+    if (model.phase === "idle") model.view = readView(model.board, new Set(), new Set());
+  }
+
+  /** The Overflow: after each move the flood rises, and spills over you at half the board. */
+  function riseFlood(model: Model) {
+    if (model.emergency?.kind !== "overflow" || !model.boss || model.boss.hp <= 0 || model.outcome) return;
+    for (const cell of floodCells(model.jelly, model.mask, 2 + model.boss.phase, model.rng)) model.jelly[cell.r]![cell.c] = true;
+    if (floodLevel(model.jelly, model.mask) >= SPILL_AT) {
+      drainFlood(model.jelly, model.rng);
+      model.playerHp = Math.max(0, model.playerHp - SPILL_BITE);
+      model.sting = 0.5;
+      say(model, "It spilled over!");
+      sfxBad();
+      haptic("hurt");
+      if (model.playerHp <= 0) loseRound(model, "The ward flooded");
+    }
+    bump();
+  }
+
   async function finish(run: number) {
     const model = modelRef.current;
     if (!model || runRef.current !== run || model.outcome) return;
-    const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly) };
+    const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly), wrapsLeft: countWraps(model.board) };
     const healed = model.level.encounter === "heal" && model.heal >= (model.level.healNeed ?? 1);
-    const cleared = model.level.encounter === "microbe" && model.germKills >= (model.level.swarm?.count ?? 1) && model.germs.length === 0;
-    const wonGoal = model.level.bossHp ? model.bossHp <= 0 : healed || cleared ? true : model.level.encounter ? false : goalsMet(model.level, progress);
+    // A leak costs life, not the ward: the wave is cleared once every germ has been dealt with.
+    const cleared = model.level.encounter === "microbe" && model.germLeft <= 0 && model.germs.length === 0;
+    const wonGoal = model.boss ? model.boss.hp <= 0 : healed || cleared ? true : model.level.encounter ? false : goalsMet(model.level, progress);
     if (wonGoal) {
       const bonus = model.moves * 100;
       if (bonus > 0) {
@@ -999,6 +1325,7 @@ export function SweetCare() {
       particleRef.current?.stars();
       unlockAudio();
       sfxWin();
+      haptic("win");
       startCelebration();
       closeRound(model, true, elapsed);
       bump();
@@ -1011,6 +1338,7 @@ export function SweetCare() {
       model.curtain = "card";
       model.phase = "idle";
       sfxLose();
+      haptic("lose");
       closeRound(model, false, model.elapsed);
       bump();
       return;
@@ -1042,7 +1370,8 @@ export function SweetCare() {
     bump();
   }
 
-  async function runClears(run: number, first: ClearPlan | null, comboStart: number) {
+  /** Plays a move's clears and cascades, and returns how many clear steps it took. */
+  async function runClears(run: number, first: ClearPlan | null, comboStart: number): Promise<number> {
     let combo = comboStart;
     let plan = first;
     let celebrated = false;
@@ -1067,7 +1396,7 @@ export function SweetCare() {
       const current = modelRef.current;
       if (current) current.maxCombo = Math.max(current.maxCombo, Math.max(step, plan.combo));
       await playPlan(run, plan);
-      if (runRef.current !== run || !modelRef.current) return;
+      if (runRef.current !== run || !modelRef.current) return step;
       combo += 1;
       plan = planFromMatches(modelRef.current.board, combo);
     }
@@ -1076,12 +1405,29 @@ export function SweetCare() {
       bump();
     }
     await finish(run);
+    return step;
   }
 
   async function playSwap(a: Pos, b: Pos) {
     const model = modelRef.current;
     if (!model || model.phase !== "idle" || model.outcome || model.moves <= 0) return;
     if (!adjacent(a, b)) return;
+    const stuck = [a, b].some((pos) => {
+      const tile = model.board[pos.r]?.[pos.c];
+      return Boolean(tile && model.locks.has(tile.id));
+    });
+    if (stuck) {
+      model.selected = null;
+      model.banner = "Taped down!";
+      sfxBad();
+      bump();
+      window.setTimeout(() => {
+        const current = modelRef.current;
+        if (current?.banner === "Taped down!") current.banner = null;
+        bump();
+      }, 700);
+      return;
+    }
     const run = runRef.current;
     unlockAudio();
     clearHint();
@@ -1097,6 +1443,7 @@ export function SweetCare() {
     );
     bump();
     sfxRoll();
+    haptic("swap");
     await wait(reducedMotion() ? 40 : 320);
     if (runRef.current !== run || !modelRef.current) return;
     if (!commitSwap(model.board, a, b)) {
@@ -1109,6 +1456,7 @@ export function SweetCare() {
       ].filter((roll): roll is { id: number; dir: 1 | -1 } => roll !== null);
       sfxRoll();
       sfxBad();
+      haptic("bad");
       model.form = 0;
       bump();
       await wait(reducedMotion() ? 40 : 280);
@@ -1121,26 +1469,23 @@ export function SweetCare() {
     }
     model.moves -= 1;
     model.rolls = [];
-    if (model.level.id >= 3 && !model.assist) {
-      model.form += 1;
-      if (model.form >= 2) {
-        model.assist = true;
-        model.form = 0;
-      }
-    }
     bump();
-    await runClears(run, planAfterSwap(model.board, a, b, 1), 1);
+    const steps = await runClears(run, planAfterSwap(model.board, a, b, 1), 1);
+    if (runRef.current === run && modelRef.current) {
+      trackAssist(modelRef.current, modelRef.current.level.id, steps >= 2);
+      riseFlood(modelRef.current);
+    }
   }
 
   function handleTap(pos: Pos) {
     const model = modelRef.current;
-    if (!model || model.outcome) return;
+    if (!model || model.outcome || model.paused) return;
     unlockAudio();
     if (model.phase === "aim-blast") {
       if (model.boosters.blast <= 0) return;
       const plan = planCross(model.board, pos);
       if (!plan) return;
-      model.boosters.blast -= 1;
+      drawBooster(model, "blast");
       model.phase = "busy";
       model.selected = null;
       clearHint();
@@ -1150,11 +1495,12 @@ export function SweetCare() {
     if (model.phase === "aim-stripe") {
       const tile = model.board[pos.r]?.[pos.c];
       if (!tile || model.boosters.stripe <= 0) return;
-      model.boosters.stripe -= 1;
+      drawBooster(model, "stripe");
       upgradeSpecial(tile, pos.c);
       model.phase = "idle";
       model.view = readView(model.board, new Set(), new Set([tile.id]));
       sfxSpecial();
+      haptic("special");
       bump();
       return;
     }
@@ -1162,6 +1508,7 @@ export function SweetCare() {
     const selected = model.selected;
     if (!selected) {
       model.selected = pos;
+      haptic("tap");
       bump();
       return;
     }
@@ -1189,10 +1536,11 @@ export function SweetCare() {
     const model = modelRef.current;
     if (!model || model.phase === "busy" || model.outcome || model.boosters.aid <= 0) return;
     unlockAudio();
-    model.boosters.aid -= 1;
+    drawBooster(model, "aid");
     model.moves += 5;
     model.banner = "Summoned!";
     model.phase = "idle";
+    haptic("special");
     const mid = { r: Math.floor((model.level.rows - 1) / 2), c: Math.floor((model.level.cols - 1) / 2) };
     summonImps(
       model,
@@ -1250,7 +1598,9 @@ export function SweetCare() {
           onContinue={() => openLevel(continueLevel(save))}
           onMap={() => { sfxClick(); setScreen("map"); }}
           onSettings={() => { sfxClick(); setScreen("settings"); }}
+          onRewards={() => { sfxClick(); setScreen("rewards"); }}
           onDev={() => { sfxClick(); setScreen("dev"); }}
+          onCreator={() => { sfxClick(); setScreen("creator"); }}
           onSound={toggleSound}
           onProfile={openProfile}
           notes={notes}
@@ -1268,10 +1618,40 @@ export function SweetCare() {
           }}
         />
       ) : null}
+      {screen === "creator" ? (
+        <LevelCreator
+          initialUid={creatorUid}
+          onBack={() => setScreen("home")}
+          onPlay={(level, uid) => {
+            setCreatorUid(uid);
+            startLevel(level.id, level);
+          }}
+        />
+      ) : null}
       {screen === "map" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} /> : null}
       {screen === "help" ? <Help onBack={() => setScreen("settings")} /> : null}
       {screen === "settings" ? (
-        <Settings save={save} onBack={() => setScreen("home")} onSound={toggleSound} onMusic={toggleMusic} onHelp={() => { sfxClick(); setScreen("help"); }} />
+        <OptionsScreen
+          save={save}
+          onBack={() => setScreen("home")}
+          onSound={toggleSound}
+          onMusic={toggleMusic}
+          onHaptics={toggleHaptics}
+          onPrefs={setPrefs}
+          onHelp={() => { sfxClick(); setScreen("help"); }}
+          onReset={wipeProgress}
+        />
+      ) : null}
+      {screen === "rewards" ? (
+        <RewardsScreen
+          save={save}
+          onBack={() => setScreen("home")}
+          onWallet={(recipe) => {
+            unlockAudio();
+            sfxCoins();
+            patchSave((prev) => ({ ...prev, wallet: recipe(prev.wallet, totalStars(prev)) }), "settings");
+          }}
+        />
       ) : null}
       {screen === "dev" ? (
         <DevMenu
@@ -1301,20 +1681,24 @@ export function SweetCare() {
           liquidRef={liquidRef}
           particleRef={particleRef}
           onBack={leavePlay}
+          onPause={pausePlay}
+          onResume={resumePlay}
           onSound={toggleSound}
+          onMusic={toggleMusic}
+          onHaptics={toggleHaptics}
           onProfile={openProfile}
           onAid={useAid}
           onCancel={cancelAim}
           onArm={arm}
           onAdvance={advanceCurtain}
-          onRetry={() => startLevel(model.level.id)}
-          onNext={() => (model.level.id === 5 ? setScreen("map") : openLevel(model.level.id + 1))}
+          onRetry={() => startLevel(model.level.id, model.level.custom ? model.level : undefined)}
+          onNext={() => (model.level.custom ? leavePlay() : model.level.id === 5 ? setScreen("map") : openLevel(model.level.id + 1))}
           onHome={goHome}
           onCollect={collectGift}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             const current = modelRef.current;
-            if (!current || current.phase !== "idle" || current.outcome) return;
+            if (!current || current.phase !== "idle" || current.outcome || current.paused) return;
             unlockAudio();
             const pos = cellFromEvent(event);
             if (!pos) return;
@@ -1393,6 +1777,22 @@ function Cast({
   );
 }
 
+function EmergencyMeter({ state, flood }: { state: EmergencyState; flood: number }) {
+  const label = state.kind === "code-blue" ? `Code Blue · ♥ ×${state.clock > 0 ? 2 : 1}` : state.kind === "overflow" ? "The Overflow" : "Audit";
+  const value = state.kind === "overflow" ? `${Math.round(flood * 100)}%` : `${Math.max(0, Math.ceil(state.clock))}s`;
+  const fill = state.kind === "overflow" ? Math.min(1, flood / SPILL_AT) : Math.max(0, state.clock / state.span);
+  const hot = state.kind === "overflow" ? fill > 0.75 : state.kind === "audit" ? state.warned : fill < 0.3;
+  return (
+    <div className={`emergency-meter ${state.kind}${hot ? " hot" : ""}`}>
+      <div className="meter-label"><span>{label}</span><span>{value}</span></div>
+      <div className="boss-bar" role="meter" aria-label={label} aria-valuenow={Math.round(fill * 100)} aria-valuemin={0} aria-valuemax={100}>
+        <span style={{ width: `${Math.round(fill * 100)}%` }} />
+      </div>
+      <p className="emergency-tip">{EMERGENCY_TIP[state.kind]}</p>
+    </div>
+  );
+}
+
 function ShiftChip() {
   const shift = shiftForDate();
   return (
@@ -1402,8 +1802,9 @@ function ShiftChip() {
   );
 }
 
-function Home({ save, onNew, onContinue, onMap, onSettings, onDev, onSound, onProfile, notes, logOpen, onToggleLog }: { save: SaveData; onNew: () => void; onContinue: () => void; onMap: () => void; onSettings: () => void; onDev: () => void; onSound: () => void; onProfile: () => void; notes: Note[]; logOpen: boolean; onToggleLog: () => void }) {
+function Home({ save, onNew, onContinue, onMap, onSettings, onRewards, onDev, onCreator, onSound, onProfile, notes, logOpen, onToggleLog }: { save: SaveData; onNew: () => void; onContinue: () => void; onMap: () => void; onSettings: () => void; onRewards: () => void; onDev: () => void; onCreator: () => void; onSound: () => void; onProfile: () => void; notes: Note[]; logOpen: boolean; onToggleLog: () => void }) {
   const played = save.unlocked > 1 || Object.values(save.stars).some((n) => n > 0);
+  const waiting = rewardsWaiting(save.wallet, totalStars(save), dayKey());
   return (
     <div className="column home">
       <div className="crush-nav">
@@ -1418,10 +1819,16 @@ function Home({ save, onNew, onContinue, onMap, onSettings, onDev, onSound, onPr
       <div className="scroll">
         <p className="tagline">Match the sweets. Mend the ward.</p>
         <ShiftChip />
-        <p className="star-total home-stars">
-          <Star className="star on" aria-hidden />
-          {totalStars(save)}/45
-        </p>
+        <div className="home-purse">
+          <p className="star-total home-stars">
+            <Star className="star on" aria-hidden />
+            {totalStars(save)}/{LEVELS.length * 3}
+          </p>
+          <p className="star-total coin-total">
+            <Coins className="coin-icon" aria-hidden />
+            {save.wallet.coins}
+          </p>
+        </div>
         <div className="hero-row" aria-hidden>
           {HOSPITAL_KINDS.map((kind) => (
             <img key={kind} src={`/sprites/${kind}.png`} alt="" />
@@ -1431,6 +1838,12 @@ function Home({ save, onNew, onContinue, onMap, onSettings, onDev, onSound, onPr
           <button className="btn" type="button" onClick={onNew}>New Game</button>
           <button className="btn" type="button" onClick={onContinue} disabled={!played}>Continue</button>
           <button className="btn secondary" type="button" onClick={onMap}>World map</button>
+          <button className={waiting ? "btn rewards-btn ready" : "btn secondary rewards-btn"} type="button" onClick={onRewards}>
+            <Gift aria-hidden />
+            Rewards
+            {waiting ? <span className="ready-dot" aria-label={`${waiting} ready`}>{waiting}</span> : null}
+          </button>
+          <button className="btn secondary" type="button" onClick={onCreator}>Level creator</button>
           <button className="btn secondary" type="button" onClick={onSettings}>Settings</button>
           <button className="btn secondary" type="button" onClick={onDev}>Dev</button>
           <button className="btn secondary" type="button" onClick={onToggleLog}>Launch log{notes.length ? ` (${notes.length})` : ""}</button>
@@ -1478,25 +1891,6 @@ function DevMenu({
               {level.id}. {level.name}{level.bossHp ? " · Boss" : ""}{level.encounter === "microbe" ? " · Microbes" : ""}{level.encounter === "heal" ? " · Heal" : ""}
             </button>
           ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Settings({ save, onBack, onSound, onMusic, onHelp }: { save: SaveData; onBack: () => void; onSound: () => void; onMusic: () => void; onHelp: () => void }) {
-  return (
-    <div className="column help">
-      <div className="map-head">
-        <button className="icon-btn" type="button" onClick={onBack} aria-label="Back"><ChevronLeft /></button>
-        <h2>Settings</h2>
-        <span />
-      </div>
-      <div className="scroll">
-        <div className="stack">
-          <button className="btn" type="button" onClick={onSound}>{save.sound ? "Sound on" : "Sound off"}</button>
-          <button className="btn secondary" type="button" onClick={onMusic}>{save.music ? "Music on" : "Music off"}</button>
-          <button className="btn secondary" type="button" onClick={onHelp}>How to care</button>
         </div>
       </div>
     </div>
@@ -1744,7 +2138,7 @@ function ComboCounter({ live, best }: { live: number; best: number }) {
 }
 
 function Play({
-  model, save, side, cell, slotRef, frame, boardRef, liquidRef, particleRef, onBack, onSound, onProfile, onAid, onCancel, onArm, onAdvance, onRetry, onNext, onHome, onCollect, onPointerDown, onPointerMove, onPointerUp,
+  model, save, side, cell, slotRef, frame, boardRef, liquidRef, particleRef, onBack, onPause, onResume, onSound, onMusic, onHaptics, onProfile, onAid, onCancel, onArm, onAdvance, onRetry, onNext, onHome, onCollect, onPointerDown, onPointerMove, onPointerUp,
 }: {
   model: Model;
   save: SaveData;
@@ -1756,7 +2150,11 @@ function Play({
   liquidRef: React.RefObject<LiquidHandle | null>;
   particleRef: React.RefObject<ParticleHandle | null>;
   onBack: () => void;
+  onPause: () => void;
+  onResume: () => void;
   onSound: () => void;
+  onMusic: () => void;
+  onHaptics: () => void;
   onProfile: () => void;
   onAid: () => void;
   onCancel: () => void;
@@ -1770,8 +2168,9 @@ function Play({
   onPointerMove: (event: React.PointerEvent<HTMLDivElement>) => void;
   onPointerUp: (event: React.PointerEvent<HTMLDivElement>) => void;
 }) {
-  const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly) };
-  const bossMax = model.level.bossHp ?? 0;
+  const progress = { score: model.score, collected: model.collected, jellyLeft: countJelly(model.jelly), wrapsLeft: countWraps(model.board) };
+  const boss = model.boss;
+  const bossMax = boss?.max ?? 0;
   const microbes = model.level.encounter === "microbe";
   const healing = model.level.encounter === "heal";
   const arena = bossMax > 0 || microbes || healing;
@@ -1779,36 +2178,39 @@ function Play({
   const germQuota = model.level.swarm?.count ?? 1;
   const healPct = Math.min(100, Math.round((model.heal / healNeed) * 100));
   const frac = bossMax
-    ? Math.max(0, 1 - model.bossHp / bossMax)
+    ? Math.max(0, 1 - (boss?.hp ?? 0) / bossMax)
     : healing
       ? Math.min(1, model.heal / healNeed)
       : microbes
         ? Math.min(1, model.germKills / germQuota)
-        : goalFraction(model.level, progress, model.jellyTotal);
+        : goalFraction(model.level, progress, model.jellyTotal, model.wrapsTotal);
+  const chips = arena ? [] : goalChips(model.level, progress, model.jellyTotal, model.wrapsTotal);
   const best = save.best[String(model.level.id)] ?? 0;
   const hintKeys = new Set((model.hint ?? []).map((pos) => keyOf(pos)));
   const icon = cell * 1.08;
   const scoreRef = useRef<HTMLElement | null>(null);
   const bossRef = useRef<HTMLElement | null>(null);
   const [kitOpen, setKitOpen] = useState(false);
-  const scene = bossMax ? "/scenes/boss.jpg" : arena ? "/scenes/care.jpg" : `/scenes/${String(model.level.id).padStart(2, "0")}.jpg`;
+  const scene = bossMax ? "/scenes/boss.jpg" : arena ? "/scenes/care.jpg" : `/scenes/${String(sceneFor(model.level)).padStart(2, "0")}.jpg`;
   const cols = model.level.cols;
   const rows = model.level.rows;
-  const boardH = arena ? Math.round(side * rows / cols) : side;
+  const boardH = Math.round(side * rows / cols);
   const grid = (
     <>
-      <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
-      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${bossMax > 0 && model.bossNear >= 98 ? " contact" : ""}`} style={{ width: arena ? "100%" : side, height: boardH }}>
+      <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} holes={model.mask} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
+      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}`} style={{ width: arena ? "100%" : side, height: boardH }}>
         <div className="board" ref={boardRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
           <div className={`pieces${model.animate ? " anim" : ""}`}>
             {model.view.map((tile) => {
               const selected = model.selected?.r === tile.r && model.selected?.c === tile.c;
               const roll = model.rolls.find((item) => item.id === tile.id);
               return (
-                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
+                <div key={tile.id} className={["tile", tile.dying ? "dying" : "", tile.born ? "born" : "", selected ? "sel" : "", tile.wrap ? `wrapped wrap-${tile.wrap}` : "", hintKeys.has(`${tile.r},${tile.c}`) ? "hint" : "", model.locks.has(tile.id) ? "taped" : "", model.marked.includes(tile.id) ? "marked" : "", model.audited.includes(tile.id) ? "audited" : "", tile.special ? `power-${tile.special}` : "", roll ? (roll.dir > 0 ? "roll-cw" : "roll-ccw") : ""].filter(Boolean).join(" ")} style={{ width: icon, height: icon, transform: `translate(${tile.c * cell + (cell - icon) / 2}px, ${tile.r * cell + (cell - icon) / 2}px)` }}>
+                  {arena && model.jelly[tile.r]?.[tile.c] ? <span className="goo" aria-hidden /> : null}
                   <img className="candy" src={spriteFor(tile)} alt="" draggable={false} />
                   {tile.special === "row" || tile.special === "col" ? <span className="shine" /> : null}
                   {tile.special === "bomb" ? <span className="ring" /> : null}
+                  {tile.wrap ? <span className="wrap-band" aria-hidden /> : null}
                 </div>
               );
             })}
@@ -1829,7 +2231,11 @@ function Play({
     <div className={`column play${arena ? " boss-play" : ""}`}>
       <div className="crush-nav">
         <span className="nav-side">
-          <button className="icon-btn" type="button" onClick={onBack} aria-label="Back to map"><ChevronLeft /></button>
+          {model.outcome ? (
+            <button className="icon-btn" type="button" onClick={onBack} aria-label="Back to map"><ChevronLeft /></button>
+          ) : (
+            <button className="icon-btn" type="button" onClick={onPause} disabled={Boolean(model.countdown)} aria-label="Pause"><Pause /></button>
+          )}
           <button className="icon-btn" type="button" onClick={onSound} aria-label={save.sound ? "Mute sound" : "Sound on"}>{save.sound ? <Volume2 /> : <VolumeX />}</button>
         </span>
         <img className="header-title" src="/ui/crush-title.png" alt="Sweet Care Crush" />
@@ -1839,16 +2245,26 @@ function Play({
       </div>
       <section className="crush-hud">
         <div className="level-slab">
-          <b className="lvl-num">{model.level.id}</b>
+          <b className="lvl-num">{model.level.custom ? "✎" : model.level.id}</b>
           <div className="lvl-copy">
             <div className="lvl-kicker">{model.level.shiftLabel ?? "Level"} {model.level.boss ? `· ${model.level.boss}` : ""}</div>
             <div className="lvl-name">{model.level.name}</div>
             <div className="bar" aria-hidden><span style={{ width: `${Math.round(frac * 100)}%` }} /></div>
           </div>
         </div>
+        {chips.length ? (
+          <ul className="goal-chips" aria-label="Goals">
+            {chips.map((chip) => (
+              <li key={chip.key} className={chip.done ? "done" : ""}>
+                {chip.kind ? <img src={`/sprites/${chip.kind}.png`} alt={chip.kind} /> : <i className={chip.jelly ? "chip-jelly" : chip.wrap ? "chip-wrap" : "chip-score"} aria-label={chip.jelly ? "Jelly" : chip.wrap ? "Wraps" : "Score"} />}
+                <span>{chip.label}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <div className="score-slab">
           <div className="hs-col">
-            <span className="kicker">High Score</span>
+            <span className="kicker">Score</span>
             <strong className="live-score" ref={scoreRef} key={model.score}>{model.score}</strong>
             <span className="capsule" aria-hidden><i className="seg red" /><i className="seg gold" /><i className="seg violet" /></span>
             <span className="sr-only">Score {model.score}. Best {best}.</span>
@@ -1857,13 +2273,19 @@ function Play({
         </div>
       </section>
       <ComboCounter live={model.dive} best={model.maxCombo} />
-      {bossMax > 0 ? (
-        <div className="boss-strip">
+      {boss ? (
+        <div className={`boss-strip phase-${boss.phase}${model.sting > 0 ? " stung" : ""}`}>
           <div className="boss-meters">
             <div>
-              <div className="meter-label"><span>Nurse Karen</span><span>{model.bossHp <= 0 ? "Down" : model.bossHp}</span></div>
-              <div className="boss-bar" role="meter" aria-label="Nurse Karen health" aria-valuenow={model.bossHp} aria-valuemin={0} aria-valuemax={bossMax}>
-                <span style={{ width: `${Math.round((model.bossHp / bossMax) * 100)}%` }} />
+              <div className="meter-label">
+                <span>{boss.profile.name}<i className="phase-pips" aria-label={`Phase ${boss.phase + 1} of 3`}>{[0, 1, 2].map((n) => <b key={n} className={n <= boss.phase ? "on" : ""} />)}</i></span>
+                <span>{boss.hp <= 0 ? "Down" : boss.guard > 0 ? "Guard" : boss.hp}</span>
+              </div>
+              <div className={`boss-bar${boss.guard > 0 ? " guarded" : ""}`} role="meter" aria-label={`${boss.profile.name} health`} aria-valuenow={boss.hp} aria-valuemin={0} aria-valuemax={bossMax}>
+                <em style={{ width: `${Math.round((boss.hp / bossMax) * 100)}%` }} />
+                <span style={{ width: `${Math.round((boss.hp / bossMax) * 100)}%` }} />
+                <s style={{ left: "33.3%" }} />
+                <s style={{ left: "66.6%" }} />
               </div>
             </div>
             <div>
@@ -1873,6 +2295,7 @@ function Play({
               </div>
             </div>
           </div>
+          {model.emergency ? <EmergencyMeter state={model.emergency} flood={floodLevel(model.jelly, model.mask)} /> : null}
         </div>
       ) : null}
       {microbes ? (
@@ -1894,14 +2317,25 @@ function Play({
         </div>
       ) : null}
       <div className={`play-stage${arena ? " boss-stage" : ""}`} ref={arena ? undefined : slotRef}>
-        {bossMax > 0 ? (
-          <span ref={bossRef} className={`karen-walk${model.bossBump ? " flinch" : ""}${model.bossSlow > 0 ? " hurt" : ""}${model.bossHot > 0 ? " hot" : ""}`} style={{ left: `${6 + model.bossLane * 88}%`, top: `${model.bossNear * 0.58}%` }}>
-            {model.bossHot > 0 ? <span className="hot-line">I'm hot!</span> : null}
-            {model.bossHot > 0 ? <span className="steam" /> : null}
-            <span className="karen-fan">
-              <KarenWalk slow={model.bossSlow > 0 || model.bossHot > 0} facing={model.bossDir} paused={Boolean(model.outcome) || model.bossHp <= 0} />
+        {boss ? (
+          <>
+            <span className="danger-glow" aria-hidden style={{ opacity: Math.max(0, (boss.near - 55) / 45) }} />
+            {boss.action?.move === "charge" ? (
+              <span className="charge-lane" aria-hidden style={{ left: `${12 + boss.lane * 76}%`, top: `${boss.near * 0.58}%`, ["--wind" as string]: String(windupProgress(boss)) }} />
+            ) : null}
+            <span ref={bossRef} className={["karen-walk", boss.hot > 0 ? "hot" : "", boss.slow > 0 ? "hurt" : "", boss.action ? `winding ${boss.action.move}` : "", boss.guard > 0 ? "guard" : "", `phase-${boss.phase}`, boss.hp <= 0 ? "down" : ""].filter(Boolean).join(" ")} style={{ left: `${12 + boss.lane * 76}%`, top: `${boss.near * 0.58}%`, ["--depth" as string]: String(0.86 + boss.near * 0.0026) }}>
+              {boss.action ? (
+                <span className={`intent ${boss.action.move}`} role="status" style={{ ["--wind" as string]: String(windupProgress(boss)) }}>
+                  <i aria-hidden />
+                  {MOVE_LABEL[boss.action.move]}
+                </span>
+              ) : boss.hot > 0 ? <span className="hot-line">I'm hot!</span> : null}
+              {boss.hot > 0 || boss.action?.move === "coffee" ? <span className="steam" /> : null}
+              <span className="karen-fan">
+                <KarenWalk slow={boss.slow > 0 || boss.hot > 0} facing={boss.dir} paused={Boolean(model.outcome) || model.paused || boss.hp <= 0 || Boolean(boss.action)} />
+              </span>
             </span>
-          </span>
+          </>
         ) : microbes ? (
           <>
             <div className="objectives">
@@ -1912,8 +2346,8 @@ function Play({
             {model.germs.map((germ) => {
               const lead = model.germs.reduce((best, item) => (item.y > best.y ? item : best));
               return (
-                <span key={germ.id} ref={germ.id === lead.id ? bossRef : undefined} className="germ" style={{ left: `${germ.x}%`, top: `${germ.y}%` }}>
-                  <img src={`/sprites/germ-${germ.sprite}.png`} alt="" />
+                <span key={germ.id} ref={germ.id === lead.id ? bossRef : undefined} className={["germ", germ.kind, germ.hurt > 0 ? "hit" : "", germ.tell > 0 ? "tell" : "", germ.dash > 0 ? "dash" : ""].filter(Boolean).join(" ")} style={{ left: `${germ.x}%`, top: `${germ.y}%` }}>
+                  <img src={germ.kind === "mother" ? "/sprites/germ-boss.png" : `/sprites/germ-${germ.sprite}.png`} alt="" />
                   <i style={{ width: `${Math.max(0, (germ.hp / germ.max) * 100)}%` }} />
                 </span>
               );
@@ -1963,6 +2397,9 @@ function Play({
         </button>
       </div>
       <ParticleLayer boardRef={boardRef} scoreRef={scoreRef} bossRef={bossRef} rows={rows} cols={cols} apiRef={particleRef} />
+      {model.paused && !model.outcome ? (
+        <PauseSheet save={save} level={model.level} onResume={onResume} onRestart={onRetry} onQuit={onBack} onSound={onSound} onMusic={onMusic} onHaptics={onHaptics} />
+      ) : null}
       {model.outcome ? (
         <Outro model={model} save={save} destroyed={KINDS.filter((kind) => model.collected[kind] > 0)} onAdvance={onAdvance} onRetry={onRetry} onNext={onNext} onBack={onBack} onProfile={onProfile} onHome={onHome} onCollect={onCollect} />
       ) : null}
@@ -1990,6 +2427,7 @@ function KarenWalk({ slow, facing, paused }: { slow: boolean; facing: number; pa
     const ctx = canvas.getContext("2d");
     let raf = 0;
     let alive = true;
+    let box: { w: number; h: number } | null = null;
     const paint = () => {
       if (!alive) return;
       raf = requestAnimationFrame(paint);
@@ -2048,6 +2486,14 @@ function KarenWalk({ slow, facing, paused }: { slow: boolean; facing: number; pa
         }
       }
       if (maxX <= minX || maxY <= minY) return;
+      // Keep her scale steady mid-stride: the crop follows her center but its size only ever grows.
+      const span = Math.max(maxX - minX + 1, box?.w ?? 0);
+      const tall = Math.max(maxY - minY + 1, box?.h ?? 0);
+      box = { w: span, h: tall };
+      const mid = (minX + maxX) / 2;
+      minX = Math.max(0, Math.round(mid - span / 2));
+      maxX = Math.min(w - 1, minX + span - 1);
+      minY = Math.max(0, maxY - tall + 1);
       const cw = maxX - minX + 1;
       const ch = maxY - minY + 1;
       if (canvas.width !== cw || canvas.height !== ch) {
@@ -2188,6 +2634,57 @@ function CardReveal({ levelId, onClose }: { levelId: number; onClose: () => void
     </div>
   );
 }
+function PauseSheet({ save, level, onResume, onRestart, onQuit, onSound, onMusic, onHaptics }: {
+  save: SaveData;
+  level: LevelDef;
+  onResume: () => void;
+  onRestart: () => void;
+  onQuit: () => void;
+  onSound: () => void;
+  onMusic: () => void;
+  onHaptics: () => void;
+}) {
+  const [confirm, setConfirm] = useState<"restart" | "quit" | null>(null);
+  const resumeRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    resumeRef.current?.focus();
+  }, [confirm]);
+  const realTime = Boolean(level.bossHp || level.encounter === "microbe");
+  if (confirm) {
+    return (
+      <div className="pause-sheet">
+        <div className="modal" role="alertdialog" aria-label={confirm === "quit" ? "Quit this ward?" : "Restart this ward?"}>
+          <h2>{confirm === "quit" ? "Quit ward?" : "Restart?"}</h2>
+          <p>{confirm === "quit" ? (level.custom ? "You'll go back to the editor." : "This attempt won't count and your moves are lost.") : "You'll start this ward again from the first move."}</p>
+          <div className="pause-actions">
+            <button className="btn" type="button" ref={resumeRef} onClick={() => setConfirm(null)}>Keep playing</button>
+            <button className="btn secondary" type="button" onClick={confirm === "quit" ? onQuit : onRestart}>{confirm === "quit" ? "Quit" : "Restart"}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="pause-sheet">
+      <div className="modal" role="dialog" aria-label="Paused">
+        <h2>Paused</h2>
+        <p>{level.custom ? "Your test level" : level.name}{realTime ? " · the ward is holding still" : ""}</p>
+        <div className="pause-actions">
+          <button className="btn" type="button" ref={resumeRef} onClick={onResume}>Resume</button>
+          <button className="btn secondary" type="button" onClick={() => setConfirm("restart")}>Restart</button>
+          <button className="btn secondary" type="button" onClick={() => setConfirm("quit")}>{level.custom ? "Back to editor" : "Quit to map"}</button>
+        </div>
+        <div className="pause-toggles" role="group" aria-label="Quick settings">
+          <button type="button" className={save.sound ? "on" : ""} aria-pressed={save.sound} onClick={onSound}>Sound</button>
+          <button type="button" className={save.music ? "on" : ""} aria-pressed={save.music} onClick={onMusic}>Music</button>
+          <button type="button" className={save.haptics ? "on" : ""} aria-pressed={save.haptics} onClick={onHaptics}>Vibration</button>
+        </div>
+        <p className="pause-key">Esc or P pauses and resumes.</p>
+      </div>
+    </div>
+  );
+}
+
 function Outro({
   model,
   save,
@@ -2212,7 +2709,7 @@ function Outro({
   onCollect: (levelId: number) => void;
 }) {
   const won = model.outcome === "win";
-  const pending = won && !(save.openedGifts ?? []).includes(model.level.id);
+  const pending = won && !model.level.custom && !(save.openedGifts ?? []).includes(model.level.id);
   const [giftPhase, setGiftPhase] = useState<"box" | "open" | "kept">(pending ? "box" : "kept");
   const openGift = () => {
     unlockAudio();
@@ -2243,6 +2740,7 @@ function Outro({
               {destroyed.length === 0 ? <span>None yet</span> : null}
             </div>
           </div>
+          {model.payout ? <PayoutCard payout={model.payout} /> : null}
           {model.badges.length > 0 ? <BadgeFlash badges={model.badges} /> : <p className="summary-note">No badges this round.</p>}
           <button className="btn" type="button" onClick={onAdvance}>Next</button>
         </div>
@@ -2259,6 +2757,9 @@ function Outro({
       {model.savedNow ? (
         <p className="save-banner">Progress saved.</p>
       ) : null}
+      {model.payout ? (
+        <p className="coin-banner"><Coins className="coin-icon" aria-hidden />+{model.payout.total} coins · {save.wallet.coins} in your purse</p>
+      ) : null}
       {won && model.level.id === 5 ? (
         <p className="save-banner">Loot case unlocked. Open the suitcase in your profile to decorate home base.</p>
       ) : null}
@@ -2270,12 +2771,26 @@ function Outro({
           <button className="btn" type="button" onClick={onNext}>Play next level</button>
         ) : null}
         <button className="btn secondary" type="button" onClick={onRetry}>Replay last game</button>
-        <button className="btn secondary" type="button" onClick={onBack}>World map</button>
+        <button className="btn secondary" type="button" onClick={onBack}>{model.level.custom ? "Back to editor" : "World map"}</button>
         <button className="btn secondary" type="button" onClick={onProfile}>Profile</button>
         <button className="btn secondary" type="button" onClick={onHome}>Main menu</button>
       </div>
       {dock}
       {reveal}
+    </div>
+  );
+}
+
+function PayoutCard({ payout }: { payout: Payout }) {
+  return (
+    <div className="payout" aria-label={`${payout.total} coins earned`}>
+      <span className="kicker">Coins earned</span>
+      <ul>
+        {payout.lines.map((line) => (
+          <li key={line.label}><span>{line.label}</span><b>+{line.coins}</b></li>
+        ))}
+      </ul>
+      <p className="payout-total"><Coins className="coin-icon" aria-hidden />+<CountUp value={payout.total} /></p>
     </div>
   );
 }

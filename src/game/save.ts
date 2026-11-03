@@ -1,6 +1,8 @@
 import { defaultCareer, type Career } from "./profile.ts";
 import { previewSeed } from "./generator.ts";
 import { dayKey, shiftForDate, type ShiftId } from "./shifts.ts";
+import { defaultPrefs, readPrefs, type Prefs } from "./prefs.ts";
+import { defaultWallet, readWallet, type Wallet } from "./rewards.ts";
 
 export interface DecorPin {
   id: string;
@@ -21,6 +23,7 @@ export interface SaveData {
   times: Record<string, number>;
   sound: boolean;
   music: boolean;
+  haptics: boolean;
   career: Career;
   gifts: string[];
   /** Level ids whose secret gift was opened. */
@@ -33,12 +36,16 @@ export interface SaveData {
   clears: Record<string, number>;
   loot: boolean;
   decor: DecorPin[];
+  prefs: Prefs;
+  wallet: Wallet;
 }
 
 const KEY = "sweet-care-save-v1";
+/** Highest campaign level id. Gifts and stars exist for every level up to it (custom levels use 90). */
+const LAST_LEVEL = 30;
 
 export function defaultSave(): SaveData {
-  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [] };
+  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [], prefs: defaultPrefs(), wallet: defaultWallet() };
 }
 
 export function rememberOpened(opened: number[] | undefined, levelId: number): number[] {
@@ -62,6 +69,7 @@ export function loadSave(): SaveData {
       times: parsed.times ?? {},
       sound: parsed.sound !== false,
       music: parsed.music !== false,
+      haptics: parsed.haptics !== false,
       career: {
         ...defaultCareer(),
         ...parsed.career,
@@ -70,13 +78,15 @@ export function loadSave(): SaveData {
       },
       gifts: Array.isArray(parsed.gifts) ? parsed.gifts.filter((id) => typeof id === "string") : [],
       openedGifts: Array.isArray(parsed.openedGifts)
-        ? parsed.openedGifts.filter((id) => typeof id === "number" && id >= 1 && id <= 15)
+        ? parsed.openedGifts.filter((id) => typeof id === "number" && id >= 1 && id <= LAST_LEVEL)
         : [],
       seeds: numberMap(parsed.seeds),
       attemptShifts: shiftMap(parsed.attemptShifts),
       clears: numberMap(parsed.clears),
       loot: parsed.loot === true || (parsed.stars?.["5"] ?? 0) > 0,
       decor: readDecor(parsed.decor),
+      prefs: readPrefs(parsed.prefs),
+      wallet: readWallet(parsed.wallet),
     };
   } catch {
     return defaultSave();
@@ -86,6 +96,19 @@ export function loadSave(): SaveData {
 export function writeSave(save: SaveData) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(KEY, JSON.stringify(save));
+}
+
+/** Wipe progress and rewards. Audio, haptics and the nurse's look stay. */
+export function resetProgress(save: SaveData): SaveData {
+  const fresh = defaultSave();
+  return {
+    ...fresh,
+    sound: save.sound,
+    music: save.music,
+    haptics: save.haptics,
+    prefs: save.prefs,
+    career: { ...fresh.career, name: save.career.name, look: save.career.look },
+  };
 }
 
 function numberMap(value: unknown): Record<string, number> {

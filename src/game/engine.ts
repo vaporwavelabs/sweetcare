@@ -7,7 +7,12 @@ export interface Tile {
   id: number;
   kind: Kind;
   special: Special;
+  /** Bandage wrap layers. A wrapped tile cannot be swapped and a match peels one layer instead of clearing it. */
+  wrap?: number;
 }
+
+/** true marks a playable cell. Holes stay empty and tiles fall through them. */
+export type Mask = boolean[][];
 
 export interface Pos {
   r: number;
@@ -251,7 +256,7 @@ function expand(board: Board, seeds: Pos[], burst: Burst, focus: Kind | null): P
   while (queue.length) {
     const pos = queue.shift()!;
     const tile = board[pos.r]![pos.c];
-    if (!tile || detonated.has(tile.id)) continue;
+    if (!tile || detonated.has(tile.id) || tile.wrap) continue;
     let extras: Pos[] | null = null;
     if (tile.special === "rainbow") {
       extras = kindCells(board, focus ?? mostCommon(board));
@@ -282,6 +287,8 @@ export interface ScoreFeed {
 
 export interface ClearPlan {
   removals: Pos[];
+  /** Wrapped tiles the clear touched. They lose a layer and stay on the board. */
+  peels: Pos[];
   spawns: { r: number; c: number; kind: Kind; special: Power }[];
   collected: Record<Kind, number>;
   score: number;
@@ -300,9 +307,32 @@ export function comboWeight(combo: number): number {
 }
 
 /** One assisted refill. Only level 3 and up, and only while a charge is armed. */
+/** How many moves in a row without a cascade before the refill helper steps in. */
+export const DRY_SPELL = 3;
+
+/**
+ * The refill helper is a catch-up aid, not a combo machine: from level 3 it arms only after a
+ * dry spell (moves that set off no cascade), and an armed refill nudges new tiles rather than
+ * rigging them.
+ */
 export function diveFavor(levelId: number, armed: boolean): number {
   if (levelId < 3 || !armed) return 0;
-  return 2;
+  return 4;
+}
+
+export interface AssistState {
+  assist: boolean;
+  form: number;
+}
+
+/** Call once a move has finished resolving. `cascaded` is true when it chained two or more clears. */
+export function trackAssist(state: AssistState, levelId: number, cascaded: boolean): void {
+  if (levelId < 3 || state.assist) return;
+  state.form = cascaded ? 0 : state.form + 1;
+  if (state.form >= DRY_SPELL) {
+    state.assist = true;
+    state.form = 0;
+  }
 }
 
 export function comboLabel(combo: number): string | null {
@@ -326,20 +356,27 @@ function finalize(
   const collected = emptyCollected();
   const seen = new Set<string>();
   const unique: Pos[] = [];
+  const peels: Pos[] = [];
   for (const pos of removals) {
     const key = keyOf(pos);
     if (seen.has(key)) continue;
     seen.add(key);
     const tile = board[pos.r]?.[pos.c];
     if (!tile) continue;
+    if (tile.wrap) {
+      peels.push(pos);
+      continue;
+    }
     unique.push(pos);
     collected[tile.kind] += 1;
   }
+  const kept = spawns.filter((spawn) => !board[spawn.r]?.[spawn.c]?.wrap);
   return {
     removals: unique,
-    spawns,
+    peels,
+    spawns: kept,
     collected,
-    score: unique.length * 50 * comboWeight(combo) + spawns.length * 100,
+    score: (unique.length + peels.length) * 50 * comboWeight(combo) + kept.length * 100,
     banner: banner ?? comboLabel(combo),
     combo,
     feeds: [],
@@ -442,6 +479,7 @@ export function planCross(board: Board, pos: Pos): ClearPlan | null {
 
 export function swapWouldMatch(board: Board, a: Pos, b: Pos): boolean {
   if (!adjacent(a, b) || !board[a.r]?.[a.c] || !board[b.r]?.[b.c]) return false;
+  if (board[a.r]![a.c]!.wrap || board[b.r]![b.c]!.wrap) return false;
   swapCells(board, a, b);
   const ta = board[a.r]![a.c]!;
   const tb = board[b.r]![b.c]!;
@@ -493,6 +531,10 @@ export function paintSpecials(board: Board, plan: ClearPlan): { dyingIds: number
   const spawnAt = new Set(plan.spawns.map((spawn) => `${spawn.r},${spawn.c}`));
   const dyingIds: number[] = [];
   const bornIds: number[] = [];
+  for (const pos of plan.peels) {
+    const tile = board[pos.r]?.[pos.c];
+    if (tile?.wrap) tile.wrap -= 1;
+  }
   for (const pos of plan.removals) {
     const tile = board[pos.r]?.[pos.c];
     if (!tile) continue;
@@ -554,26 +596,34 @@ function favoredKind(board: Board, r: number, c: number, kinds: readonly Kind[],
   return kinds[Math.floor(rng() * kinds.length)] ?? kinds[0]!;
 }
 
+export function isOpen(mask: Mask | undefined, r: number, c: number): boolean {
+  return !mask || mask[r]?.[c] !== false;
+}
+
 export function collapse(
   board: Board,
   rng: Rng,
   kinds: readonly Kind[],
   favor = 0,
+  mask?: Mask,
 ): { board: Board; spawned: SpawnDrop[] } {
   const rows = board.length;
   const cols = board[0]!.length;
   const next: Board = Array.from({ length: rows }, () => Array<Tile | null>(cols).fill(null));
   const spawned: SpawnDrop[] = [];
   for (let c = 0; c < cols; c++) {
-    let write = rows - 1;
+    const open: number[] = [];
+    for (let r = rows - 1; r >= 0; r--) if (isOpen(mask, r, c)) open.push(r);
+    let write = 0;
     for (let r = rows - 1; r >= 0; r--) {
       const tile = board[r]![c];
-      if (!tile) continue;
-      next[write]![c] = tile;
-      write -= 1;
+      if (!tile || write >= open.length) continue;
+      next[open[write]!]![c] = tile;
+      write += 1;
     }
     let fromR = -1;
-    for (let r = write; r >= 0; r--) {
+    for (let i = write; i < open.length; i++) {
+      const r = open[i]!;
       const kind = favor >= 2 ? favoredKind(next, r, c, kinds, rng, favor) : (kinds[Math.floor(rng() * kinds.length)] ?? kinds[0]!);
       const tile = makeTile(kind);
       next[r]![c] = tile;
@@ -598,12 +648,13 @@ function wouldMatchFill(board: Board, r: number, c: number, kind: Kind): boolean
   return false;
 }
 
-export function createBoard(rng: Rng, rows: number, cols: number, kinds: readonly Kind[]): Board {
+export function createBoard(rng: Rng, rows: number, cols: number, kinds: readonly Kind[], mask?: Mask): Board {
   let last: Board | null = null;
   for (let attempt = 0; attempt < 40; attempt++) {
     const board: Board = Array.from({ length: rows }, () => Array<Tile | null>(cols).fill(null));
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
+        if (!isOpen(mask, r, c)) continue;
         let kind = kinds[0]!;
         for (let tryKind = 0; tryKind < 12; tryKind++) {
           kind = kinds[Math.floor(rng() * kinds.length)] ?? kinds[0]!;
@@ -622,7 +673,15 @@ export function shuffleBoard(board: Board, rng: Rng): Board {
   const rows = board.length;
   const cols = board[0]!.length;
   const tiles: Tile[] = [];
-  for (const row of board) for (const tile of row) if (tile) tiles.push(tile);
+  const spots: Pos[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const tile = board[r]![c];
+      if (!tile) continue;
+      tiles.push(tile);
+      spots.push({ r, c });
+    }
+  }
   let fallback: Board | null = null;
   for (let attempt = 0; attempt < 30; attempt++) {
     const bag = tiles.slice();
@@ -632,9 +691,10 @@ export function shuffleBoard(board: Board, rng: Rng): Board {
       bag[i] = bag[j]!;
       bag[j] = tmp;
     }
-    const next: Board = Array.from({ length: rows }, (_, r) =>
-      bag.slice(r * cols, (r + 1) * cols),
-    );
+    const next: Board = Array.from({ length: rows }, () => Array<Tile | null>(cols).fill(null));
+    spots.forEach((spot, index) => {
+      next[spot.r]![spot.c] = bag[index]!;
+    });
     fallback = next;
     if (findGroups(next).length === 0 && hasMove(next)) return next;
   }
@@ -648,8 +708,14 @@ export function upgradeSpecial(tile: Tile, col: number) {
   else tile.special = "row";
 }
 
-export function boardFull(board: Board): boolean {
-  return board.every((row) => row.every(Boolean));
+export function boardFull(board: Board, mask?: Mask): boolean {
+  return board.every((row, r) => row.every((tile, c) => Boolean(tile) || !isOpen(mask, r, c)));
+}
+
+export function countWraps(board: Board): number {
+  let n = 0;
+  for (const row of board) for (const tile of row) n += tile?.wrap ?? 0;
+  return n;
 }
 
 export function centroid(cells: Pos[]): Pos {
