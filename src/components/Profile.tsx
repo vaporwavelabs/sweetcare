@@ -42,24 +42,56 @@ export function DocAvatar({
   );
 }
 
-/** The end-of-level dance. Each nurse has her own keyed clip. */
-export function Cheer({ career }: { career: Career }) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+/** Sprite sheets cut from the keyed dance clips: 73 frames at 12 fps, 12 columns by 7 rows, with real alpha. */
+const DANCE_FRAMES = 73;
+const DANCE_COLS = 12;
+const DANCE_ROWS = 7;
+const DANCE_FPS = 12;
+
+/**
+ * The end-of-level dance. Each nurse has her own clip.
+ * It plays from a transparent sprite sheet, because iPhone Safari draws VP9 alpha video on a black box.
+ */
+export function Cheer({ career, className = "" }: { career: Career; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
   const [reduced, setReduced] = useState(false);
-  const src = career.look === "f" ? "/avatar/dance-f.webm" : "/avatar/dance.webm";
+  const female = career.look === "f";
+  const sheet = female ? "/avatar/dance-f-sheet.webp" : "/avatar/dance-sheet.webp";
+  const tint = female ? "none" : scrubFilter(career.scrub);
   useEffect(() => {
-    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReduced(media.matches);
-    if (media.matches) return;
-    const video = videoRef.current;
-    if (!video) return;
-    video.muted = true;
-    void video.play().catch(() => {});
-  }, [src]);
-  if (reduced) return <DocAvatar career={career} className="cheer" />;
+    const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (media?.matches) {
+      setReduced(true);
+      return;
+    }
+    const el = ref.current;
+    if (!el) return;
+    let raf = 0;
+    let last = -1;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const frame = Math.floor(((now - start) / 1000) * DANCE_FPS) % DANCE_FRAMES;
+      if (frame !== last) {
+        last = frame;
+        const col = frame % DANCE_COLS;
+        const row = Math.floor(frame / DANCE_COLS);
+        el.style.backgroundPosition = `${(col / (DANCE_COLS - 1)) * 100}% ${(row / (DANCE_ROWS - 1)) * 100}%`;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [sheet]);
+  if (reduced) return <DocAvatar career={career} className={`cheer ${className}`} />;
   return (
-    <span className={`doc cheer dance${career.look === "f" ? " look-f" : ""}`}>
-      <video key={src} ref={videoRef} src={src} autoPlay muted loop playsInline preload="auto" />
+    <span className={`doc cheer dance${female ? " look-f" : ""} ${className}`}>
+      <span
+        ref={ref}
+        className="dance-sheet"
+        role="img"
+        aria-label="Your nurse dancing"
+        style={{ backgroundImage: `url(${sheet})`, backgroundSize: `${DANCE_COLS * 100}% ${DANCE_ROWS * 100}%`, filter: tint === "none" ? undefined : tint }}
+      />
     </span>
   );
 }

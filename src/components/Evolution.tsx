@@ -117,18 +117,21 @@ export function CareCard({
   after,
   challenge,
   challengeDone,
+  bar = true,
 }: {
   points: CarePoints;
   before: number;
   after: Evolution;
   challenge: Challenge | null;
   challengeDone: boolean;
+  /** The result card draws its own big progress bar, so it turns this one off. */
+  bar?: boolean;
 }) {
   const mults: string[] = [];
   if (points.streakMult > 1) mults.push(`Streak ${after.streak} · x${points.streakMult.toFixed(1)}`);
   if (points.auraMult > 1) mults.push(`Healing aura · x${points.auraMult}`);
   return (
-    <div className="care-card" aria-label={`${points.total} care points earned`}>
+    <div className="care-card rise" aria-label={`${points.total} care points earned`}>
       <span className="kicker">Care points</span>
       <ul>
         {points.lines.map((line) => (
@@ -141,7 +144,7 @@ export function CareCard({
       {challenge && !challengeDone ? <p className="care-missed">Bonus missed · {challenge.label}</p> : null}
       {mults.length ? <p className="care-mult">{mults.join(" · ")}</p> : null}
       <p className="care-total">+{points.total} CP</p>
-      <XpBar from={before} to={after.xp} />
+      {bar ? <XpBar from={before} to={after.xp} /> : null}
     </div>
   );
 }

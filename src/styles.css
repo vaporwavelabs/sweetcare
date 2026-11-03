@@ -5,6 +5,7 @@
 @import "./evolution.css";
 @import "./story.css";
 @import "./prologue.css";
+@import "./level-end.css";
 
 @theme {
   --color-pink: #fb3ba6;
@@ -1886,9 +1887,11 @@
 
 .summary {
   width: min(100%, 22rem);
-  max-height: min(34rem, calc(100% - 1rem));
-  overflow: auto;
-  padding: 0.55rem 0.85rem 0.65rem;
+  max-height: min(36rem, calc(100% - 1rem));
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
 }
 
 .card-hold {
@@ -1916,10 +1919,10 @@
 
 .summary .doc.cheer,
 .summary .doc.cheer.look-f {
-  width: min(14rem, 72vw);
-  height: min(14rem, 30vh);
-  margin: 0 auto 0.1rem;
-  background: #fff;
+  width: min(13rem, 66vw);
+  height: min(13rem, 27vh);
+  margin: 0 auto;
+  background: transparent;
 }
 
 .summary .stack {
@@ -1934,10 +1937,7 @@
   background: var(--color-pink-deep);
   color: var(--color-cream);
   box-shadow: 0 0.2rem 0 #9d1058;
-  margin-top: 0.45rem;
-  position: sticky;
-  bottom: 0;
-  z-index: 6;
+  margin: 0;
 }
 
 .summary-score {
@@ -2425,22 +2425,17 @@ button.outro {
 }
 
 .doc.cheer.dance {
-  background: #fff;
-  border-radius: 1.15rem;
-}
-
-.summary .doc.cheer.dance {
-  overflow: visible;
-  background: #fff;
+  background: transparent;
   border-radius: 0;
+  overflow: visible;
 }
 
-.doc.cheer video {
+.doc.cheer .dance-sheet {
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  display: block;
-  background: #fff;
+  background-repeat: no-repeat;
+  background-position: 0 0;
   pointer-events: none;
 }
 

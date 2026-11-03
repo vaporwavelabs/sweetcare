@@ -94,6 +94,7 @@ import {
 import { createPerks, judgeMove, PERKS, powersIn, type PerkState, type PerkId } from "@/game/perks";
 import { hasSeen, markSeen, resetSeen, sceneAfter, sceneBefore, SCENE_IDS, SCENES, type SceneId } from "@/game/cutscenes";
 import { Cutscene } from "@/components/Cutscene";
+import { LevelComplete, StageBar } from "@/components/LevelEnd";
 import { PerkFx, type PerkFlash } from "@/components/PerkFx";
 import { GIFT_CARDS, cardForLevel, rememberGift } from "@/game/cards";
 import { haptic, setHapticStrength, setHapticsPref } from "@/game/haptics";
@@ -190,7 +191,12 @@ interface Model {
   elapsed: number;
   badges: { id: string; label: string }[];
   rankedUp: boolean;
-  curtain: "cheer" | "card" | "next";
+  /** done: the "Level complete!" beat on the board, card: the result card, next: the follow-up menu. */
+  curtain: "cheer" | "done" | "card" | "next";
+  /** Points the leftover moves paid at the end of a win, for the level complete beat. */
+  endBonus?: number;
+  /** Why a round was lost early (a fever, a flood), for the level end beat. */
+  endReason?: string;
   savedNow: boolean;
   shake: boolean;
   animate: boolean;
@@ -560,9 +566,25 @@ export function SweetCare() {
     curtainTimers.current = [];
   }
 
+  /** Holds the board on the level complete beat, then raises the result card. */
+  function holdCurtain(model: Model, ms: number) {
+    model.curtain = "done";
+    curtainTimers.current.push(window.setTimeout(() => raiseCard(model), motionReduced() ? Math.min(ms, 900) : ms));
+  }
+
+  function raiseCard(model: Model) {
+    if (modelRef.current !== model || model.curtain !== "done") return;
+    model.curtain = "card";
+    bump();
+  }
+
   function advanceCurtain() {
     const current = modelRef.current;
     if (!current?.outcome || current.curtain === "next") return;
+    if (current.curtain === "done") {
+      raiseCard(current);
+      return;
+    }
     current.curtain = "next";
     stopCelebration();
     bump();
@@ -997,9 +1019,10 @@ export function SweetCare() {
     model.elapsed = Math.max(0, Date.now() - model.startedAt);
     model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
     model.outcome = "lose";
-    model.curtain = "card";
+    holdCurtain(model, 1700);
     model.phase = "idle";
     model.banner = banner;
+    model.endReason = banner;
     sfxLose();
     haptic("lose");
     closeRound(model, false, model.elapsed);
@@ -1526,6 +1549,7 @@ export function SweetCare() {
     const wonGoal = model.boss ? model.boss.hp <= 0 : healed || cleared ? true : model.level.encounter ? false : goalsMet(model.level, progress);
     if (wonGoal) {
       const bonus = model.moves * 100;
+      model.endBonus = bonus;
       if (bonus > 0) {
         model.score += bonus;
         model.banner = `+${bonus} move bonus`;
@@ -1543,7 +1567,7 @@ export function SweetCare() {
       model.outcome = "win";
       model.phase = "idle";
       model.flash = "win";
-      model.curtain = "card";
+      holdCurtain(model, 2800);
       particleRef.current?.rain();
       particleRef.current?.stars();
       unlockAudio();
@@ -1571,7 +1595,7 @@ export function SweetCare() {
       model.elapsed = Math.max(0, Date.now() - model.startedAt);
       model.badges = model.maxCombo >= 5 ? [{ id: "streak", label: "5 streak" }] : [];
       model.outcome = "lose";
-      model.curtain = "card";
+      holdCurtain(model, 1700);
       model.phase = "idle";
       sfxLose();
       haptic("lose");
@@ -2552,7 +2576,7 @@ function Play({
     </>
   );
   return (
-    <div className={`column play${arena ? " boss-play" : ""}`}>
+    <div className={`column play${arena ? " boss-play" : ""}${model.outcome && model.curtain === "done" ? (model.outcome === "win" ? " slowmo" : " slowmo lost") : ""}`}>
       <div className="crush-nav">
         <span className="nav-side">
           {model.outcome ? (
@@ -2730,7 +2754,9 @@ function Play({
       {model.paused && !model.outcome ? (
         <PauseSheet save={save} level={model.level} onResume={onResume} onRestart={onRetry} onQuit={onBack} onSound={onSound} onMusic={onMusic} onHaptics={onHaptics} />
       ) : null}
-      {model.outcome ? (
+      {model.outcome && model.curtain === "done" ? (
+        <LevelComplete won={model.outcome === "win"} name={model.level.custom ? "Your test level" : model.level.name} reason={model.outcome === "lose" ? model.endReason ?? null : null} stars={model.stars} bonus={model.endBonus ?? 0} onSkip={onAdvance} />
+      ) : model.outcome ? (
         <Outro model={model} save={save} destroyed={KINDS.filter((kind) => model.collected[kind] > 0)} onAdvance={onAdvance} onRetry={onRetry} onNext={onNext} onBack={onBack} onProfile={onProfile} onHome={onHome} onCollect={onCollect} />
       ) : null}
     </div>
@@ -3066,26 +3092,35 @@ function Outro({
     return (
       <div className={present ? "outro card-hold has-gift" : "outro card-hold"}>
         {won ? <Confetti /> : null}
-        <div className="modal summary" role="dialog" aria-label={won ? "Level summary" : "Out of moves"}>
-          {won ? <Cheer career={save.career} /> : <DocAvatar career={save.career} className="cheer" />}
-          <Stars n={won ? model.stars : 0} />
-          <h2>{won ? model.level.name : "Out of moves"}</h2>
-          {model.rankedUp ? <p className="rank-up">Rank up · {rankTitle(save.career.rank)}</p> : null}
-          <p className="summary-score">Score <b><CountUp value={model.score} /></b><span>{formatClock(model.elapsed)}</span></p>
-          <p className="combo-line">Best combo <b>x<CountUp value={model.maxCombo} /></b></p>
-          <div className="wreck">
-            <span className="kicker">Destroyed</span>
-            <div className="wreck-row">
-              {destroyed.map((kind) => (
-                <span key={kind} className="wreck-item"><img src={`/sprites/${kind}.png`} alt="" /><CountUp value={model.collected[kind]} /></span>
-              ))}
-              {destroyed.length === 0 ? <span>None yet</span> : null}
+        <div className={`modal summary${won ? " won" : " lost"}`} role="dialog" aria-label={won ? "Level summary" : "Out of moves"}>
+          <div className="summary-body">
+            <div className="summary-hero">
+              <span className="hero-halo" aria-hidden />
+              {won ? <span className="hero-rays" aria-hidden /> : null}
+              {won ? <Cheer career={save.career} /> : <DocAvatar career={save.career} className="cheer" />}
             </div>
+            <Stars n={won ? model.stars : 0} />
+            <h2>{won ? model.level.name : "Out of moves"}</h2>
+            {model.rankedUp ? <p className="rank-up">Rank up · {rankTitle(save.career.rank)}</p> : null}
+            <p className="summary-score rise">Score <b><CountUp value={model.score} /></b><span>{formatClock(model.elapsed)}</span></p>
+            <p className="combo-line rise">Best combo <b>x<CountUp value={model.maxCombo} /></b></p>
+            {model.care ? <StageBar from={model.care.before} to={model.care.evolution.xp} gained={model.care.points.total} /> : null}
+            <div className="wreck rise">
+              <span className="kicker">Destroyed</span>
+              <div className="wreck-row">
+                {destroyed.map((kind, index) => (
+                  <span key={kind} className="wreck-item" style={{ animationDelay: `${900 + index * 90}ms` }}><img src={`/sprites/${kind}.png`} alt="" /><CountUp value={model.collected[kind]} /></span>
+                ))}
+                {destroyed.length === 0 ? <span>None yet</span> : null}
+              </div>
+            </div>
+            {model.payout ? <PayoutCard payout={model.payout} /> : null}
+            {model.care ? <CareCard points={model.care.points} before={model.care.before} after={model.care.evolution} challenge={model.challenge} challengeDone={model.care.challengeDone} bar={false} /> : null}
+            {model.badges.length > 0 ? <BadgeFlash badges={model.badges} /> : <p className="summary-note rise">No badges this round.</p>}
           </div>
-          {model.payout ? <PayoutCard payout={model.payout} /> : null}
-          {model.care ? <CareCard points={model.care.points} before={model.care.before} after={model.care.evolution} challenge={model.challenge} challengeDone={model.care.challengeDone} /> : null}
-          {model.badges.length > 0 ? <BadgeFlash badges={model.badges} /> : <p className="summary-note">No badges this round.</p>}
-          <button className="btn" type="button" onClick={onAdvance}>Next</button>
+          <div className="summary-foot">
+            <button className="btn" type="button" onClick={onAdvance}>Next</button>
+          </div>
         </div>
         {dock}
         {reveal}
@@ -3130,7 +3165,7 @@ function Outro({
 
 function PayoutCard({ payout }: { payout: Payout }) {
   return (
-    <div className="payout" aria-label={`${payout.total} coins earned`}>
+    <div className="payout rise" aria-label={`${payout.total} coins earned`}>
       <span className="kicker">Coins earned</span>
       <ul>
         {payout.lines.map((line) => (

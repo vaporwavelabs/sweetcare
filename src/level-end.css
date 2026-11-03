@@ -1,0 +1,650 @@
+/*
+ * End of level: the "Level complete!" beat over a slowed board, and the result card.
+ * Components: src/components/LevelEnd.tsx and Outro in src/components/SweetCare.tsx.
+ * Imported by styles.css before its own rules, so selectors here are one step more specific where they override.
+ */
+
+/* ---------- Slow motion on the board ---------- */
+
+.column.play.slowmo .play-stage {
+  animation: le-slow-zoom 2.8s var(--sc-ease-out) both;
+}
+
+.column.play.slowmo .board-shell {
+  transition: filter 1.2s ease;
+  filter: saturate(1.25) brightness(1.06);
+}
+
+.column.play.slowmo.lost .board-shell {
+  filter: saturate(0.7) brightness(0.94);
+}
+
+/* Each tile floats up and settles, like the board taking a slow breath. A stagger walks the wave across. */
+.column.play.slowmo:not(.lost) .tile .candy {
+  animation: le-float 1.9s ease-in-out both;
+}
+
+.column.play.slowmo:not(.lost) .tile:nth-child(6n + 1) .candy { animation-delay: 0.05s; }
+.column.play.slowmo:not(.lost) .tile:nth-child(6n + 2) .candy { animation-delay: 0.14s; }
+.column.play.slowmo:not(.lost) .tile:nth-child(6n + 3) .candy { animation-delay: 0.23s; }
+.column.play.slowmo:not(.lost) .tile:nth-child(6n + 4) .candy { animation-delay: 0.32s; }
+.column.play.slowmo:not(.lost) .tile:nth-child(6n + 5) .candy { animation-delay: 0.41s; }
+.column.play.slowmo:not(.lost) .tile:nth-child(6n) .candy { animation-delay: 0.5s; }
+
+.column.play.slowmo.lost .tile .candy {
+  animation: le-droop 1.4s ease-in both;
+}
+
+@keyframes le-slow-zoom {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.05); }
+}
+
+@keyframes le-float {
+  0% { transform: translateY(0) scale(1); filter: none; }
+  45% { transform: translateY(-14%) scale(1.1) rotate(-4deg); filter: drop-shadow(0 0 0.45rem rgba(255, 236, 140, 0.95)) brightness(1.18); }
+  100% { transform: translateY(0) scale(1); filter: drop-shadow(0 0 0.2rem rgba(255, 236, 140, 0.5)); }
+}
+
+@keyframes le-droop {
+  to { transform: translateY(6%) scale(0.92); }
+}
+
+/* The overlay says it bigger, so the board's own banner steps aside. */
+.column.play.slowmo .board .banner {
+  opacity: 0;
+}
+
+/* ---------- The level complete overlay ---------- */
+
+.level-end {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--color-cream);
+  font: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.level-end-veil {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 50% 45%, rgba(120, 0, 70, 0.42) 0%, rgba(110, 0, 60, 0.55) 60%, rgba(70, 0, 40, 0.78) 100%);
+  animation: le-fade 0.7s ease both;
+}
+
+.level-end.lost .level-end-veil {
+  background: radial-gradient(circle at 50% 45%, rgba(60, 20, 60, 0.25), rgba(30, 0, 30, 0.72));
+}
+
+.level-end-rays {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 170vmax;
+  height: 170vmax;
+  margin: -85vmax 0 0 -85vmax;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 232, 140, 0.24) 0deg 9deg, transparent 9deg 24deg);
+  mask-image: radial-gradient(circle, #000 0%, transparent 42%);
+  -webkit-mask-image: radial-gradient(circle, #000 0%, transparent 42%);
+  animation: le-rays 9s linear infinite, le-fade 0.9s ease both;
+}
+
+.level-end-ring {
+  position: absolute;
+  left: 50%;
+  top: 45%;
+  width: 4rem;
+  height: 4rem;
+  margin: -2rem 0 0 -2rem;
+  border-radius: 50%;
+  border: 0.35rem solid rgba(255, 236, 150, 0.9);
+  box-shadow: 0 0 1.4rem rgba(255, 220, 120, 0.9), inset 0 0 1rem rgba(255, 255, 255, 0.7);
+  animation: le-ring 1.1s var(--sc-ease-out) 0.15s both;
+}
+
+.level-end-copy {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: -6%;
+  text-align: center;
+  pointer-events: none;
+}
+
+.level-end-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 0.92;
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 13vw, 4.4rem);
+  letter-spacing: 0.01em;
+}
+
+.level-end.lost .level-end-title {
+  font-size: clamp(2rem, 10vw, 3.4rem);
+}
+
+.level-end-word {
+  display: flex;
+}
+
+.level-end-title i {
+  display: inline-block;
+  font-style: normal;
+  color: #fff7d6;
+  background: linear-gradient(180deg, #fffdf2 0%, #ffe56a 55%, #ffad3b 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0.16rem 0 #b3105f) drop-shadow(0 0 0.7rem rgba(255, 210, 90, 0.75));
+  animation: le-letter 0.62s var(--sc-ease-pop) both;
+  animation-delay: calc(0.12s + var(--i) * 0.045s);
+}
+
+.level-end.lost .level-end-title i {
+  background: linear-gradient(180deg, #fff 0%, #ffd3ea 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  filter: drop-shadow(0 0.14rem 0 #6a1848);
+  animation-name: le-letter-soft;
+}
+
+.level-end-name {
+  font-weight: 900;
+  font-size: 1.05rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-shadow: 0 0.1rem 0 #9d1058;
+  animation: le-rise 0.5s var(--sc-ease-out) 0.75s both;
+}
+
+.level-end-stars {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.level-end-stars svg {
+  width: 2.6rem;
+  height: 2.6rem;
+  color: rgba(255, 247, 251, 0.45);
+  stroke-width: 1.6;
+  animation: le-stamp 0.5s var(--sc-ease-pop) both;
+  animation-delay: calc(0.95s + var(--i) * 0.22s);
+}
+
+.level-end-stars svg:nth-child(2) {
+  transform: translateY(-0.45rem);
+  width: 3.1rem;
+  height: 3.1rem;
+}
+
+.level-end-stars svg.on {
+  color: var(--sc-gold);
+  fill: var(--sc-gold);
+  filter: drop-shadow(0 0 0.55rem rgba(255, 214, 90, 0.95));
+}
+
+.level-end-bonus {
+  padding: 0.28rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(255, 247, 251, 0.95);
+  color: var(--sc-accent);
+  font-weight: 900;
+  font-size: 0.95rem;
+  box-shadow: 0 0.18rem 0 #9d1058;
+  animation: le-rise 0.45s var(--sc-ease-pop) 1.65s both;
+}
+
+.level-end-hint {
+  position: absolute;
+  bottom: 6%;
+  left: 0;
+  right: 0;
+  font-weight: 800;
+  font-size: 0.8rem;
+  opacity: 0.85;
+  animation: le-fade 0.5s ease 1.4s both, le-blink 1.6s ease-in-out 1.9s infinite;
+}
+
+.level-end-sparks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.level-end-sparks i {
+  position: absolute;
+  bottom: -1rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, #ffe680 40%, rgba(255, 200, 80, 0) 72%);
+  box-shadow: 0 0 0.6rem rgba(255, 220, 120, 0.9);
+  opacity: 0;
+  animation: le-mote linear infinite;
+}
+
+.level-end-sparks i.h1 {
+  background: radial-gradient(circle, #fff 0%, #ff9fd6 40%, rgba(255, 80, 170, 0) 72%);
+  box-shadow: 0 0 0.6rem rgba(255, 120, 200, 0.9);
+}
+
+.level-end-sparks i.h2 {
+  background: radial-gradient(circle, #fff 0%, #a8f5c8 40%, rgba(80, 220, 150, 0) 72%);
+  box-shadow: 0 0 0.6rem rgba(120, 240, 180, 0.85);
+}
+
+@keyframes le-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes le-rays {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes le-ring {
+  0% { transform: scale(0.2); opacity: 1; }
+  100% { transform: scale(9); opacity: 0; border-width: 0.05rem; }
+}
+
+@keyframes le-letter {
+  0% { transform: translateY(-1.6em) scale(0.4) rotate(-14deg); opacity: 0; }
+  60% { transform: translateY(0.08em) scale(1.18) rotate(4deg); opacity: 1; }
+  100% { transform: none; opacity: 1; }
+}
+
+@keyframes le-letter-soft {
+  0% { transform: translateY(0.5em); opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}
+
+@keyframes le-rise {
+  from { transform: translateY(0.7rem) scale(0.9); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes le-stamp {
+  0% { transform: scale(2.6) rotate(-25deg); opacity: 0; }
+  70% { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+@keyframes le-blink {
+  50% { opacity: 0.4; }
+}
+
+@keyframes le-mote {
+  0% { transform: translate(0, 0) scale(0.6); opacity: 0; }
+  15% { opacity: 1; }
+  100% { transform: translate(var(--drift), -78vh) scale(1.2); opacity: 0; }
+}
+
+/* ---------- Result card ---------- */
+
+.card-hold .modal.summary {
+  padding: 0;
+  animation: le-card-in 0.62s var(--sc-ease-pop) both;
+  box-shadow: 0 0.55rem 0 var(--color-pink-deep), 0 1.4rem 2.6rem rgba(110, 0, 55, 0.35);
+}
+
+.summary-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.55rem 0.85rem 0.6rem;
+  scrollbar-width: thin;
+}
+
+.summary-foot {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.85rem 0.7rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), #fff 40%);
+  box-shadow: 0 -0.6rem 0.9rem -0.5rem rgba(160, 20, 90, 0.22);
+  border-radius: 0 0 1.5rem 1.5rem;
+  position: relative;
+  z-index: 2;
+}
+
+.card-hold .summary .summary-foot .btn {
+  width: 100%;
+  max-width: 14rem;
+  margin: 0 auto;
+  animation: le-rise 0.45s var(--sc-ease-pop) 1.2s both;
+}
+
+.summary-hero {
+  position: relative;
+  display: grid;
+  place-items: center;
+  margin: 0 auto -0.2rem;
+}
+
+.summary-hero .doc.cheer {
+  position: relative;
+  z-index: 1;
+  animation: le-hero-in 0.7s var(--sc-ease-pop) 0.12s both;
+  filter: drop-shadow(0 0.55rem 0.45rem rgba(120, 10, 70, 0.22));
+}
+
+.hero-halo {
+  position: absolute;
+  left: 50%;
+  bottom: 4%;
+  width: 72%;
+  height: 72%;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 55%, rgba(255, 214, 90, 0.55) 0%, rgba(255, 143, 208, 0.42) 42%, rgba(255, 143, 208, 0) 70%);
+  animation: le-halo 2.6s ease-in-out infinite;
+}
+
+.summary.lost .hero-halo {
+  background: radial-gradient(circle at 50% 55%, rgba(200, 170, 220, 0.45) 0%, rgba(200, 170, 220, 0) 68%);
+  animation: none;
+}
+
+.hero-rays {
+  position: absolute;
+  inset: -8% 4%;
+  border-radius: 50%;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 196, 80, 0.2) 0deg 8deg, transparent 8deg 22deg);
+  mask-image: radial-gradient(circle, #000 18%, transparent 66%);
+  -webkit-mask-image: radial-gradient(circle, #000 18%, transparent 66%);
+  animation: le-rays 14s linear infinite;
+}
+
+/* Floor shadow so the cut-out nurse stands on the card instead of floating. */
+.summary-hero::after {
+  content: "";
+  position: absolute;
+  bottom: 2%;
+  left: 50%;
+  width: 42%;
+  height: 0.7rem;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, rgba(120, 10, 70, 0.25), transparent 70%);
+}
+
+.summary .stars .star {
+  width: 2.1rem;
+  height: 2.1rem;
+  color: #f3c6dc;
+  fill: #fbe3ee;
+}
+
+.summary .stars .star:nth-child(2) {
+  width: 2.5rem;
+  height: 2.5rem;
+  transform: translateY(-0.25rem);
+}
+
+.summary .stars .star.on {
+  color: var(--sc-gold-deep);
+  fill: var(--sc-gold);
+  animation: le-star-stamp 0.5s var(--sc-ease-pop) both;
+  filter: drop-shadow(0 0 0.35rem rgba(255, 196, 60, 0.75));
+}
+
+.summary .stars .star.on:nth-child(1) { animation-delay: 0.35s !important; }
+.summary .stars .star.on:nth-child(2) { animation-delay: 0.55s !important; }
+.summary .stars .star.on:nth-child(3) { animation-delay: 0.75s !important; }
+
+.card-hold .summary h2 {
+  background: linear-gradient(100deg, var(--color-pink-deep) 0%, var(--color-pink-deep) 40%, #ff8fd0 50%, var(--color-pink-deep) 60%, var(--color-pink-deep) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: le-rise 0.45s var(--sc-ease-out) 0.25s both, le-shimmer 3.2s ease-in-out 1s infinite;
+}
+
+/* Rows of the card arrive one after another. */
+.summary-body > .rise {
+  animation: le-rise 0.45s var(--sc-ease-out) both;
+}
+
+.summary-body > .rise:nth-child(4) { animation-delay: 0.45s; }
+.summary-body > .rise:nth-child(5) { animation-delay: 0.55s; }
+.summary-body > .rise:nth-child(6) { animation-delay: 0.65s; }
+.summary-body > .rise:nth-child(7) { animation-delay: 0.75s; }
+.summary-body > .rise:nth-child(8) { animation-delay: 0.85s; }
+.summary-body > .rise:nth-child(9) { animation-delay: 0.95s; }
+.summary-body > .rise:nth-child(10) { animation-delay: 1.05s; }
+.summary-body > .rise:nth-child(11) { animation-delay: 1.15s; }
+
+.summary .wreck-item {
+  animation: le-pop 0.4s var(--sc-ease-pop) both;
+}
+
+@keyframes le-card-in {
+  0% { transform: translateY(2.4rem) scale(0.86); opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}
+
+@keyframes le-hero-in {
+  0% { transform: translateY(1.2rem) scale(0.6); opacity: 0; }
+  100% { transform: none; opacity: 1; }
+}
+
+@keyframes le-halo {
+  50% { transform: translateX(-50%) scale(1.08); opacity: 0.8; }
+}
+
+@keyframes le-star-stamp {
+  0% { transform: scale(2.4) rotate(-30deg); opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes le-shimmer {
+  0%, 55% { background-position: 100% 0; }
+  100% { background-position: -50% 0; }
+}
+
+@keyframes le-pop {
+  from { transform: scale(0.3); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+/* ---------- Progress bar to the next nurse level ---------- */
+
+.stage-bar {
+  position: relative;
+  margin: 0.4rem auto 0.55rem;
+  max-width: 18rem;
+  padding: 0.5rem 0.65rem 0.45rem;
+  border-radius: 1rem;
+  background: linear-gradient(160deg, #fff0f8, #ffe3f1);
+  box-shadow: inset 0 0 0 0.12rem rgba(227, 18, 120, 0.14);
+  text-align: left;
+  color: var(--sc-ink);
+}
+
+.stage-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.stage-badge {
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff, #ff8fd0 70%);
+  color: #fff;
+  font-size: 1rem;
+  text-shadow: 0 0.06rem 0 #b3105f;
+  box-shadow: 0 0.12rem 0 #c0177a, 0 0 0.7rem var(--evo-glow, #ffd25a);
+}
+
+.stage-names {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.05;
+  flex: 1;
+  min-width: 0;
+}
+
+.stage-names small {
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sc-ink-soft);
+}
+
+.stage-names b {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  color: var(--sc-accent);
+}
+
+.stage-gain {
+  flex: 0 0 auto;
+  padding: 0.14rem 0.5rem;
+  border-radius: 999px;
+  background: var(--sc-mint);
+  color: #0d5c3a;
+  font-weight: 900;
+  font-size: 0.8rem;
+  animation: le-rise 0.4s var(--sc-ease-pop) 0.8s both;
+}
+
+.stage-track {
+  position: relative;
+  height: 0.95rem;
+  margin: 0.42rem 0 0.22rem;
+  border-radius: 999px;
+  background: rgba(106, 24, 72, 0.14);
+  box-shadow: inset 0 0.12rem 0.2rem rgba(106, 24, 72, 0.22);
+  overflow: hidden;
+}
+
+.stage-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 0.95rem;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #ff5fb0, #ff9fd0 45%, #ffd25a 85%, #fff2a8);
+  box-shadow: 0 0 0.6rem rgba(255, 196, 80, 0.75);
+  overflow: hidden;
+}
+
+.stage-shine {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 55%), linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.7) 45%, transparent 60%);
+  background-size: 100% 100%, 220% 100%;
+  animation: le-bar-shine 1.8s ease-in-out infinite;
+}
+
+.stage-head {
+  position: absolute;
+  right: 0.1rem;
+  top: 50%;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-top: -0.35rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0.5rem 0.2rem rgba(255, 240, 170, 0.95);
+}
+
+.stage-bar.filling .stage-head {
+  animation: le-head 0.35s ease-in-out infinite alternate;
+}
+
+.stage-ticks {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: space-evenly;
+  pointer-events: none;
+}
+
+.stage-ticks i {
+  width: 0.1rem;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.stage-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--sc-ink-soft);
+}
+
+.stage-next b {
+  color: var(--sc-accent);
+}
+
+.stage-up {
+  position: absolute;
+  top: -0.6rem;
+  right: 0.6rem;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fff2a8, #ffd25a);
+  color: #7a2a00;
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  box-shadow: 0 0.14rem 0 #d98a00, 0 0 0.9rem rgba(255, 210, 90, 0.9);
+  animation: le-stamp 0.5s var(--sc-ease-pop) both;
+}
+
+.stage-bar.leveled {
+  box-shadow: inset 0 0 0 0.14rem rgba(255, 196, 60, 0.75), 0 0 1rem rgba(255, 210, 90, 0.55);
+}
+
+@keyframes le-bar-shine {
+  0% { background-position: 0 0, 160% 0; }
+  100% { background-position: 0 0, -60% 0; }
+}
+
+@keyframes le-head {
+  to { transform: scale(1.35); }
+}
+
+.card-hold .modal.summary {
+  max-height: min(44rem, calc(100% - 1rem));
+}
+
+.card-hold.has-gift .modal.summary {
+  max-height: min(44rem, calc(100% - 5.8rem));
+}
+
+/* Phones: a smaller hero so the breakdown gets the room. */
+@media (max-width: 520px), (max-height: 760px) {
+  .card-hold .summary .doc.cheer,
+  .card-hold .summary .doc.cheer.look-f {
+    width: min(10.5rem, 52vw);
+    height: min(10.5rem, 21vh);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .level-end *,
+  .summary-body *,
+  .column.play.slowmo * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
