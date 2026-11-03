@@ -1,10 +1,11 @@
 import { useLayoutEffect, useRef } from "react";
-import { ParticleWorld, type ParticleKind } from "@/game/particles";
+import { ParticleWorld, depthScale, type ParticleKind } from "@/game/particles";
 import { FxWorld, lifeT, type Fx } from "@/game/fx";
 import { KINDS, type Kind, type Power } from "@/game/engine";
 
 export type ParticleHandle = {
-  burst: (cells: { r: number; c: number; kind: Kind }[]) => void;
+  /** Candy debris thrown out of cleared cells. Deeper cascades throw harder and glow hotter. */
+  burst: (cells: { r: number; c: number; kind: Kind }[], combo?: number) => void;
   summon: (cells: { r: number; c: number }[], count?: number) => void;
   rain: () => void;
   scoreFly: (feeds: { r: number; c: number; kind: Kind; points: number }[], onArrive: (points: number) => void) => void;
@@ -369,17 +370,44 @@ export function ParticleLayer({
         ctx.globalAlpha = 1 - t;
         ctx.strokeStyle = item.color;
         ctx.lineCap = "round";
-        ctx.lineWidth = item.size * (1 - t * 0.6);
+        const width = item.size * (1 - t * 0.6);
+        const tailX = item.x - item.vx * 0.035;
+        const tailY = item.y - item.vy * 0.035;
+        // Bloom pass, then a hot white core: reads as light, not paint.
+        ctx.globalAlpha = (1 - t) * 0.35;
+        ctx.lineWidth = width * 3.2;
         ctx.beginPath();
         ctx.moveTo(item.x, item.y);
-        ctx.lineTo(item.x - item.vx * 0.035, item.y - item.vy * 0.035);
+        ctx.lineTo(tailX, tailY);
+        ctx.stroke();
+        ctx.globalAlpha = 1 - t;
+        ctx.lineWidth = width;
+        ctx.beginPath();
+        ctx.moveTo(item.x, item.y);
+        ctx.lineTo(tailX, tailY);
+        ctx.stroke();
+        ctx.strokeStyle = "#ffffff";
+        ctx.globalAlpha = (1 - t) * 0.8;
+        ctx.lineWidth = Math.max(0.6, width * 0.35);
+        ctx.beginPath();
+        ctx.moveTo(item.x, item.y);
+        ctx.lineTo((item.x + tailX) / 2, (item.y + tailY) / 2);
         ctx.stroke();
       } else if (item.kind === "ember") {
         ctx.globalCompositeOperation = "lighter";
-        ctx.globalAlpha = (1 - t) * (0.6 + 0.4 * Math.sin(item.age * 30));
-        ctx.fillStyle = item.color;
+        const flicker = (1 - t) * (0.6 + 0.4 * Math.sin(item.age * 30));
+        const halo = ctx.createRadialGradient(item.x, item.y, 0, item.x, item.y, item.size * 3.2);
+        halo.addColorStop(0, item.color);
+        halo.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.globalAlpha = flicker * 0.45;
+        ctx.fillStyle = halo;
         ctx.beginPath();
-        ctx.arc(item.x, item.y, item.size, 0, Math.PI * 2);
+        ctx.arc(item.x, item.y, item.size * 3.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = flicker;
+        ctx.fillStyle = "#fffef8";
+        ctx.beginPath();
+        ctx.arc(item.x, item.y, item.size * 0.6, 0, Math.PI * 2);
         ctx.fill();
       } else if (item.kind === "ring") {
         const ease = 1 - (1 - t) * (1 - t);
@@ -465,28 +493,98 @@ export function ParticleLayer({
       const dpr = canvas.width / Math.max(1, rect.width);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, rect.width, rect.height);
-      for (const body of world.bodies) {
-        const fade = body.age > body.life * 0.72 ? 1 - (body.age - body.life * 0.72) / (body.life * 0.28) : 1;
-        const alpha = Math.max(0, fade);
+      // Candy debris in fake 3D: perspective toward the board's centre, a contact shadow on the
+      // board plane, a tumble that flips the sprite toward and away from the camera, an additive
+      // glow that flares on hits and deep cascades, and a speed streak when a piece is flung.
+      const order = world.painterOrder();
+      const box = boardBox();
+      const vx0 = box.x + box.w / 2;
+      const vy0 = box.y + box.h / 2;
+      const project = (body: (typeof order)[number]) => {
+        const scale = depthScale(body.z);
+        return { x: vx0 + (body.x - vx0) * scale, y: vy0 + (body.y - vy0) * scale, scale };
+      };
+      const fadeOf = (body: (typeof order)[number]) =>
+        Math.max(0, body.age > body.life * 0.72 ? 1 - (body.age - body.life * 0.72) / (body.life * 0.28) : 1);
+      for (const body of order) {
+        if (body.kind === "imp" || body.z < 6) continue;
+        const lift = Math.min(1, body.z / 220);
+        const sx = body.x + body.z * 0.16;
+        const sy = body.y + body.z * 0.3;
+        const radius = body.radius * (1.05 + lift * 0.9);
+        ctx.save();
+        ctx.globalAlpha = fadeOf(body) * (0.2 - lift * 0.12);
+        const shade = ctx.createRadialGradient(sx, sy, 0, sx, sy, radius);
+        shade.addColorStop(0, "rgba(120, 20, 70, 0.8)");
+        shade.addColorStop(1, "rgba(120, 20, 70, 0)");
+        ctx.fillStyle = shade;
+        ctx.beginPath();
+        ctx.ellipse(sx, sy, radius, radius * 0.62, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      for (const body of order) {
+        const alpha = fadeOf(body);
         if (body.kind === "imp") {
           drawImp(body.x, body.y, body.angle, alpha);
           continue;
         }
         const image = sprites.get(body.kind);
-        const size = body.radius * 2.8;
+        const at = project(body);
+        const size = body.radius * 2.8 * at.scale;
+        const face = Math.cos(body.tilt);
+        const squash = 0.3 + 0.7 * Math.abs(face);
+        const depthFade = body.z < 0 ? Math.max(0.55, 1 + body.z / 320) : 1;
+        const color = GLOW[body.kind];
+        const speed = Math.hypot(body.vx, body.vy);
         ctx.save();
-        ctx.translate(body.x, body.y);
-        ctx.rotate(body.angle);
-        ctx.globalAlpha = alpha;
-        const glow = ctx.createRadialGradient(0, 0, 1, 0, 0, size * 0.72);
-        glow.addColorStop(0, GLOW[body.kind]);
-        glow.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.globalCompositeOperation = "lighter";
+        if (speed > 380) {
+          const streak = Math.min(0.06, 22 / speed) * at.scale;
+          ctx.globalAlpha = alpha * depthFade * Math.min(0.5, (speed - 380) / 900);
+          ctx.strokeStyle = color;
+          ctx.lineCap = "round";
+          ctx.lineWidth = size * 0.32;
+          ctx.beginPath();
+          ctx.moveTo(at.x, at.y);
+          ctx.lineTo(at.x - body.vx * streak, at.y - body.vy * streak);
+          ctx.stroke();
+        }
+        const bloom = size * (0.78 + body.heat * 0.55);
+        ctx.globalAlpha = alpha * depthFade * (0.5 + body.heat * 0.5);
+        const glow = ctx.createRadialGradient(at.x, at.y, 0, at.x, at.y, bloom);
+        glow.addColorStop(0, "#ffffff");
+        glow.addColorStop(0.18, color);
+        glow.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = glow;
         ctx.beginPath();
-        ctx.arc(0, 0, size * 0.72, 0, Math.PI * 2);
+        ctx.arc(at.x, at.y, bloom, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+        ctx.save();
+        ctx.translate(at.x, at.y);
+        ctx.rotate(body.angle);
+        ctx.scale(1, squash);
+        ctx.globalAlpha = alpha * depthFade;
         if (image && image.complete && image.naturalWidth > 0) {
           ctx.drawImage(image, -size / 2, -size / 2, size, size);
+        }
+        // The back face catches less light; the front face gets a moving specular glint.
+        if (face < 0) {
+          ctx.globalCompositeOperation = "source-atop";
+          ctx.globalAlpha = alpha * -face * 0.32;
+          ctx.fillStyle = "#3a0a26";
+          ctx.fillRect(-size / 2, -size / 2, size, size);
+        } else {
+          ctx.globalCompositeOperation = "lighter";
+          ctx.globalAlpha = alpha * face * (0.35 + body.heat * 0.4);
+          const glint = ctx.createRadialGradient(-size * 0.18, -size * 0.22, 0, -size * 0.18, -size * 0.22, size * 0.32);
+          glint.addColorStop(0, "rgba(255,255,255,0.95)");
+          glint.addColorStop(1, "rgba(255,255,255,0)");
+          ctx.fillStyle = glint;
+          ctx.beginPath();
+          ctx.arc(-size * 0.18, -size * 0.22, size * 0.32, 0, Math.PI * 2);
+          ctx.fill();
         }
         ctx.restore();
       }
@@ -709,25 +807,36 @@ export function ParticleLayer({
     };
 
     apiRef.current = {
-      burst(cells) {
+      burst(cells, combo = 1) {
         if (reduced || cells.length === 0) return;
         fit();
-        for (const cell of cells.slice(0, 12)) {
+        const heat = Math.min(1, Math.max(0, (combo - 1) / 5));
+        const list = cells.slice(0, 12);
+        const per = list.length > 8 ? 4 : list.length > 4 ? 5 : 6;
+        list.forEach((cell, n) => {
           const origin = pointFor(cell.r, cell.c);
           const kind = cell.kind;
-          for (let i = 0; i < 6; i++) {
-            const angle = (Math.PI * 2 * i) / 6 + i * 0.18;
-            const speed = 240 + (i % 3) * 110;
+          for (let i = 0; i < per; i++) {
+            const angle = (Math.PI * 2 * i) / per + n * 0.7 + i * 0.18;
+            const speed = (240 + (i % 3) * 110) * (1 + heat * 0.45);
+            // Half the pieces jump at the glass, the rest scatter back into the board.
+            const toward = i % 2 === 0;
             world.spawn(
               kind,
               origin.x,
               origin.y,
               Math.cos(angle) * speed,
-              Math.sin(angle) * speed - 160,
+              Math.sin(angle) * speed - 160 - heat * 120,
               (i % 2 === 0 ? 11 : -11) + (kind === "pill" ? 8 : 0),
+              {
+                z: toward ? 18 : -6,
+                vz: toward ? 300 + ((i * 53 + n * 29) % 200) + heat * 160 : -(120 + ((i * 41 + n * 17) % 160)),
+                tiltSpeed: (i % 3 === 0 ? 1 : -1) * (7 + ((i * 7 + n) % 9)),
+                heat: 0.35 + heat * 0.65,
+              },
             );
           }
-        }
+        });
         kick();
       },
       summon(cells, count = 6) {

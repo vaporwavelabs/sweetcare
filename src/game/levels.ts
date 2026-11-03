@@ -79,9 +79,9 @@ export const LEVELS: LevelDef[] = [
   { id: 13, name: "Sticky Ward", rows: 6, cols: 6, kinds: PEDIATRIC.slice(0, 5), moves: longer(36), goals: [{ type: "jelly" }], star2: longer(2400), star3: longer(4200), jelly: "all" },
   { id: 14, name: "Night Shift", rows: 6, cols: 6, kinds: PEDIATRIC, moves: longer(22), goals: [{ type: "score", target: longer(5500) }], star2: longer(6800), star3: longer(8600), jelly: "none" },
   { id: 15, name: "Head Nurse", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(36), goals: [{ type: "collect", kind: "cross", count: longer(12) }], star2: longer(3200), star3: longer(5200), jelly: "none", bossHp: 220, boss: "Audit", emergency: "audit" },
-  // Side wards. Moves and stars come from scripts/levels/tune.ts: the bot wins about 80% of the
-  // first ward in each run of five and about 60% of the fifth.
-  { id: 16, name: "Neuro Ward", rows: 6, cols: 6, kinds: ["scan", "ruby", "glow", "plus", "gem", "iv"], moves: 35, goals: [{ type: "wraps" }, { type: "collect", kind: "iv", count: 14 }], star2: 8000, star3: 9000, jelly: "none", grid: [
+  // Side wards. Moves and stars come from scripts/levels/tune.ts (with a 16-move floor): the bot
+  // wins about 80% of the first ward in each run of five and about 60% of the fifth.
+  { id: 16, name: "Neuro Ward", rows: 6, cols: 6, kinds: ["scan", "ruby", "glow", "plus", "gem", "iv"], moves: 26, goals: [{ type: "wraps" }, { type: "collect", kind: "iv", count: 14 }], star2: 9000, star3: 11300, jelly: "none", grid: [
     "# . . . . #",
     ". . w w . .",
     ". w # # w .",
@@ -89,7 +89,7 @@ export const LEVELS: LevelDef[] = [
     ". . w w . .",
     "# . . . . #",
   ] },
-  { id: 17, name: "Lab Run", rows: 6, cols: 6, kinds: LAB.slice(0, 6), moves: 25, goals: [{ type: "jelly" }, { type: "collect", kind: "flask", count: 16 }], star2: 8400, star3: 9150, jelly: "none", grid: [
+  { id: 17, name: "Lab Run", rows: 6, cols: 6, kinds: LAB.slice(0, 6), moves: 16, goals: [{ type: "jelly" }, { type: "collect", kind: "flask", count: 16 }], star2: 9700, star3: 12150, jelly: "none", grid: [
     ". . . . . .",
     ". # . . # .",
     ". j j j j .",
@@ -97,7 +97,7 @@ export const LEVELS: LevelDef[] = [
     ". # j j # .",
     ". . . . . .",
   ] },
-  { id: 18, name: "Ortho Bay", rows: 6, cols: 6, kinds: ["boot", "xray", "ribs", "calcium", "screw", "pelvis"], moves: 30, goals: [{ type: "collect", kind: "pelvis", count: 24 }], star2: 10600, star3: 13200, jelly: "none", grid: [
+  { id: 18, name: "Ortho Bay", rows: 6, cols: 6, kinds: ["boot", "xray", "ribs", "calcium", "screw", "pelvis"], moves: 22, goals: [{ type: "collect", kind: "pelvis", count: 24 }], star2: 13350, star3: 18150, jelly: "none", grid: [
     ". . . . . .",
     ". . . . . .",
     "# # b . # #",
@@ -105,7 +105,7 @@ export const LEVELS: LevelDef[] = [
     ". . w w . .",
     ". . . . . .",
   ] },
-  { id: 19, name: "Peds", rows: 6, cols: 6, kinds: PEDIATRIC, moves: 29, goals: [{ type: "collect", kind: "gift", count: 26 }, { type: "wraps" }], star2: 11150, star3: 12650, jelly: "none", grid: [
+  { id: 19, name: "Peds", rows: 6, cols: 6, kinds: PEDIATRIC, moves: 18, goals: [{ type: "collect", kind: "gift", count: 26 }, { type: "wraps" }], star2: 13850, star3: 17100, jelly: "none", grid: [
     "# . . . . #",
     ". w . . w .",
     ". . . . . .",
@@ -113,7 +113,7 @@ export const LEVELS: LevelDef[] = [
     ". w . . w .",
     "# . . . . #",
   ] },
-  { id: 20, name: "Radiology", rows: 7, cols: 6, kinds: ["scan", "slate", "glow", "xray", "gem", "plus"], moves: 30, goals: [{ type: "collect", kind: "scan", count: 22 }, { type: "jelly" }], star2: 10650, star3: 13050, jelly: "none", grid: [
+  { id: 20, name: "Radiology", rows: 7, cols: 6, kinds: ["scan", "slate", "glow", "xray", "gem", "plus"], moves: 21, goals: [{ type: "collect", kind: "scan", count: 22 }, { type: "jelly" }], star2: 14250, star3: 17750, jelly: "none", grid: [
     ". . . . . .",
     "# . . . . #",
     "# # . . # #",
@@ -122,7 +122,7 @@ export const LEVELS: LevelDef[] = [
     "j j j j j j",
     "j j j j j j",
   ] },
-  { id: 21, name: "Neurology", rows: 6, cols: 6, kinds: NEURO.slice(0, 6), moves: 28, goals: [{ type: "jelly" }], star2: 9400, star3: 11150, jelly: "none", grid: [
+  { id: 21, name: "Neurology", rows: 6, cols: 6, kinds: NEURO.slice(0, 6), moves: 21, goals: [{ type: "jelly" }], star2: 9300, star3: 11250, jelly: "none", grid: [
     "# # j j # #",
     "# j j j j #",
     "j j j j j j",
@@ -130,7 +130,7 @@ export const LEVELS: LevelDef[] = [
     "# j j j j #",
     "# # j j # #",
   ] },
-  { id: 22, name: "Ortho", rows: 6, cols: 6, kinds: ["boot", "xray", "ribs", "calcium", "screw"], moves: 23, goals: [{ type: "collect", kind: "ribs", count: 16 }, { type: "collect", kind: "screw", count: 16 }, { type: "wraps" }], star2: 11050, star3: 16200, jelly: "none", grid: [
+  { id: 22, name: "Ortho", rows: 6, cols: 6, kinds: ["boot", "xray", "ribs", "calcium", "screw"], moves: 19, goals: [{ type: "collect", kind: "ribs", count: 16 }, { type: "collect", kind: "screw", count: 16 }, { type: "wraps" }], star2: 16600, star3: 23350, jelly: "none", grid: [
     ". . . . . .",
     ". . . . . .",
     ". . W W . .",
@@ -138,7 +138,7 @@ export const LEVELS: LevelDef[] = [
     ". . . . . .",
     ". . . . . .",
   ] },
-  { id: 23, name: "Med Surg", rows: 7, cols: 7, kinds: ["heart", "cross", "pill", "bandage", "kit"], moves: 19, goals: [{ type: "jelly" }, { type: "collect", kind: "kit", count: 24 }], star2: 11350, star3: 15350, jelly: "none", grid: [
+  { id: 23, name: "Med Surg", rows: 7, cols: 7, kinds: ["heart", "cross", "pill", "bandage", "kit"], moves: 16, goals: [{ type: "jelly" }, { type: "collect", kind: "kit", count: 24 }], star2: 15500, star3: 21650, jelly: "none", grid: [
     "# # . j . # #",
     "# . . j . . #",
     ". . . j . . .",
@@ -147,7 +147,7 @@ export const LEVELS: LevelDef[] = [
     "# . . j . . #",
     "# # . j . # #",
   ] },
-  { id: 24, name: "ICU", rows: 6, cols: 6, kinds: ["heart", "cross", "pill", "kit", "iv", "nurse"], moves: 36, goals: [{ type: "wraps" }, { type: "collect", kind: "iv", count: 16 }], star2: 12450, star3: 16250, jelly: "none", grid: [
+  { id: 24, name: "ICU", rows: 6, cols: 6, kinds: ["heart", "cross", "pill", "kit", "iv", "nurse"], moves: 28, goals: [{ type: "wraps" }, { type: "collect", kind: "iv", count: 16 }], star2: 15650, star3: 18800, jelly: "none", grid: [
     "w . . . . w",
     ". W . . W .",
     ". . . . . .",
@@ -155,7 +155,7 @@ export const LEVELS: LevelDef[] = [
     ". W . . W .",
     "w . . . . w",
   ] },
-  { id: 25, name: "PCU", rows: 6, cols: 6, kinds: ["heart", "cross", "kit", "teddy", "bottle"], moves: 20, goals: [{ type: "collect", kind: "bottle", count: 32 }, { type: "score", target: 14000 }], star2: 15200, star3: 17750, jelly: "none", startSpecial: "bomb" },
+  { id: 25, name: "PCU", rows: 6, cols: 6, kinds: ["heart", "cross", "kit", "teddy", "bottle"], moves: 16, goals: [{ type: "collect", kind: "bottle", count: 32 }, { type: "score", target: 14000 }], star2: 18700, star3: 27250, jelly: "none", startSpecial: "bomb" },
   { id: 26, name: "Spore Drift", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(24), goals: [], star2: longer(1400), star3: longer(2600), jelly: "none", encounter: "microbe", swarm: { count: 4, hp: 16, speed: 7, bite: 8 } },
   { id: 27, name: "Culture", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "bandage"], moves: longer(26), goals: [], star2: longer(1800), star3: longer(3200), jelly: "none", encounter: "microbe", swarm: { count: 6, hp: 24, speed: 10, bite: 12 } },
   { id: 28, name: "Outbreak", rows: 4, cols: 6, kinds: ["heart", "cross", "pill", "kit"], moves: longer(28), goals: [], star2: longer(2200), star3: longer(3800), jelly: "none", encounter: "microbe", swarm: { count: 8, hp: 32, speed: 13, bite: 16 } },

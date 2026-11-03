@@ -308,31 +308,65 @@ export function comboWeight(combo: number): number {
   return combo * 2 - 5;
 }
 
-/** One assisted refill. Only level 3 and up, and only while a charge is armed. */
-/** How many moves in a row without a cascade before the refill helper steps in. */
-export const DRY_SPELL = 3;
-
 /**
- * The refill helper is a catch-up aid, not a combo machine: from level 3 it arms only after a
- * dry spell (moves that set off no cascade), and an armed refill nudges new tiles rather than
- * rigging them.
+ * How generous the refill helper is on a ward. Early wards feel like the original build: the
+ * helper is armed from the first move, re-arms every couple of moves and keeps feeding the whole
+ * cascade, so chains of 3-5 come often. Later wards hand out fewer, softer charges, so the
+ * difficulty climbs as the player moves along the map.
+ *
+ * - `favor`: refill bias passed to `collapse` (2 = rig, 4 = nudge; see `favoredKind`).
+ * - `every`: moves between charges. A move that sets off no cascade counts double.
+ * - `chain`: how many refills in a row one charge covers (one per cascade step).
+ * - `opening`: armed before the first move.
  */
-export function diveFavor(levelId: number, armed: boolean): number {
-  if (levelId < 3 || !armed) return 0;
-  return 4;
+export interface CascadeTuning {
+  favor: number;
+  every: number;
+  chain: number;
+  opening: boolean;
+}
+
+export function cascadeTuning(levelId: number): CascadeTuning {
+  if (levelId <= 2) return { favor: 4, every: 2, chain: 2, opening: true };
+  if (levelId <= 6) return { favor: 2, every: 2, chain: 3, opening: true };
+  if (levelId <= 10) return { favor: 2, every: 2, chain: 2, opening: true };
+  if (levelId <= 15) return { favor: 2, every: 3, chain: 2, opening: true };
+  if (levelId <= 20) return { favor: 2, every: 3, chain: 1, opening: true };
+  if (levelId <= 25) return { favor: 4, every: 3, chain: 1, opening: false };
+  // Microbe and heal arenas run in real time, so keep cascades flowing there.
+  return { favor: 2, every: 2, chain: 2, opening: true };
+}
+
+/** The refill bias for the next collapse. `charges` is how many favoured refills are left this move. */
+export function diveFavor(levelId: number, charges: number): number {
+  if (charges <= 0) return 0;
+  return cascadeTuning(levelId).favor;
 }
 
 export interface AssistState {
-  assist: boolean;
+  /** Favoured refills left for the current move. */
+  assist: number;
+  /** Progress toward the next charge. */
   form: number;
 }
 
-/** Call once a move has finished resolving. `cascaded` is true when it chained two or more clears. */
+/** Charges a fresh ward starts with. */
+export function openingAssist(levelId: number): number {
+  const tuning = cascadeTuning(levelId);
+  return tuning.opening ? tuning.chain : 0;
+}
+
+/**
+ * Call once a move has finished resolving. `cascaded` is true when it chained two or more clears.
+ * Unused charges lapse at the end of a move; a new charge arms after `every` moves, sooner after
+ * a dry move.
+ */
 export function trackAssist(state: AssistState, levelId: number, cascaded: boolean): void {
-  if (levelId < 3 || state.assist) return;
-  state.form = cascaded ? 0 : state.form + 1;
-  if (state.form >= DRY_SPELL) {
-    state.assist = true;
+  const tuning = cascadeTuning(levelId);
+  state.assist = 0;
+  state.form += cascaded ? 1 : 2;
+  if (state.form >= tuning.every) {
+    state.assist = tuning.chain;
     state.form = 0;
   }
 }

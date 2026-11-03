@@ -8,6 +8,7 @@ import {
   createBoard,
   diveFavor,
   trackAssist,
+  openingAssist,
   eraseIds,
   hasMove,
   mulberry32,
@@ -42,6 +43,12 @@ export interface RunResult {
   goalScore: number;
   /** The run ended early because a fever ran out. */
   burned?: boolean;
+  /** Player moves that chained two or more clears. */
+  cascades?: number;
+  /** Longest chain of clears from one move. */
+  bestChain?: number;
+  /** Player moves made, perk bonus moves included. */
+  turns?: number;
 }
 
 export interface Report {
@@ -81,7 +88,7 @@ interface SimState {
   score: number;
   moves: number;
   collected: Record<Kind, number>;
-  assist: boolean;
+  assist: number;
   form: number;
   contagion: boolean[][];
   cleanedThisMove: number;
@@ -161,9 +168,8 @@ function play(state: SimState, plan: ClearPlan, mask: ReturnType<typeof levelMas
   for (const kind of KINDS) state.collected[kind] += plan.collected[kind];
   const painted = paintSpecials(state.board, plan);
   eraseIds(state.board, painted.dyingIds);
-  const spent = state.assist;
-  state.board = collapse(state.board, state.rng, state.level.kinds, diveFavor(state.level.id, spent), mask).board;
-  if (spent) state.assist = false;
+  state.board = collapse(state.board, state.rng, state.level.kinds, diveFavor(state.level.id, state.assist), mask).board;
+  if (state.assist > 0) state.assist -= 1;
 }
 
 function progressOf(state: SimState) {
@@ -195,7 +201,7 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
     score: 0,
     moves: level.moves,
     collected: freshCollected(),
-    assist: false,
+    assist: openingAssist(level.id),
     form: 0,
     contagion: makeContagion(level),
     cleanedThisMove: 0,
@@ -204,6 +210,9 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
     perks: createPerks(),
   };
   let burned = false;
+  let cascades = 0;
+  let turns = 0;
+  let bestChain = 0;
   let shuffles = 0;
   let guard = 0;
   while (state.moves > 0 && guard++ < 500) {
@@ -241,6 +250,9 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
       combo += 1;
       plan = planFromMatches(state.board, combo);
     }
+    turns += 1;
+    if (combo > 2) cascades += 1;
+    bestChain = Math.max(bestChain, combo - 1);
     trackAssist(state, level.id, combo > 2);
     // Combo perks, judged on the whole move, the same way the game does.
     const perk = judgeMove(state.perks, { steps: combo - 1, powers, score: state.score - before }, state.board, state.rng, mask);
@@ -263,7 +275,7 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
   const won = !burned && goalsMet(level, progressOf(state));
   const goalScore = state.score;
   if (won) state.score += state.moves * 100;
-  return { won, score: state.score, movesLeft: won ? state.moves : 0, used: burned ? level.moves : level.moves - state.moves, goalScore, ...(burned ? { burned } : {}) };
+  return { won, score: state.score, movesLeft: won ? state.moves : 0, used: burned ? level.moves : level.moves - state.moves, goalScore, cascades, bestChain, turns, ...(burned ? { burned } : {}) };
 }
 
 function quantile(sorted: number[], q: number): number {
@@ -335,6 +347,11 @@ export interface Tuning {
 
 export const MIN_MOVES = 12;
 export const MAX_MOVES = 50;
+
+/** Rolled wards never become sprints: early ones keep room for a few big chains even when the bot clears fast. */
+export function wardMovesFloor(levelId: number, shiftId?: string): number {
+  return (levelId < 10 ? 16 : 14) - (shiftId === "short-staffed" ? 3 : 0);
+}
 
 /**
  * Picks a move count so the bot wins about `target` of its runs, and star scores to match.
