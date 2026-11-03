@@ -4,6 +4,7 @@
 @import "./ui.css";
 @import "./evolution.css";
 @import "./story.css";
+@import "./prologue.css";
 @import "./level-end.css";
 
 @theme {
@@ -3700,6 +3701,25 @@ button.outro {
   background: transparent;
   color: var(--color-pink-deep);
   box-shadow: inset 0 0 0 0.14rem var(--color-pink-deep);
+}
+
+.opt-scenes {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.opt-scene-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.opt-scene-list .opt-btn {
+  width: auto;
+  flex: 1 1 auto;
+  font-size: 0.85rem;
+  padding-inline: 0.8rem;
 }
 
 .opt-btn.danger {

@@ -10,7 +10,9 @@ import type { SfxName } from "./sfx.ts";
 
 export type ActorId = "you" | "teddy" | "karen" | "germ";
 export type Pose = "enter" | "bounce" | "shake" | "dizzy" | "stomp" | "exit" | "glow";
-export type SceneFx = "alarm" | "flash" | "sparkle" | "paper" | "flood" | "hearts" | "spores" | "stamp";
+export type SceneFx = "alarm" | "flash" | "sparkle" | "paper" | "flood" | "hearts" | "spores" | "stamp" | "caps" | "confetti";
+/** Illustrated backdrops drawn in CSS (src/prologue.css) instead of a photo. */
+export type SetId = "campus" | "study" | "exam" | "exam-off" | "result" | "letter" | "ferry" | "island";
 
 export interface Beat {
   /** Who is talking. Leave out for a narrator caption. */
@@ -27,6 +29,12 @@ export interface Beat {
   card?: { kicker: string; title: string; tone: "story" | "boss" | "microbe" | "heal" | "win" };
   /** Swap the backdrop from this beat on. */
   bg?: string;
+  /** Swap to an illustrated set from this beat on. null goes back to the photo backdrop. */
+  set?: SetId | null;
+  /** Text on the stamp effect. Defaults to APPROVED. */
+  stamp?: string;
+  /** Change the music from this beat on. */
+  music?: MusicScene;
 }
 
 export interface Scene {
@@ -35,14 +43,43 @@ export interface Scene {
   bg: string;
   music: MusicScene;
   beats: Beat[];
+  /** Illustrated set the scene opens on. */
+  set?: SetId;
 }
 
 export const ACTOR_NAMES: Record<ActorId, string> = { you: "You", teddy: "Chief Teddy", karen: "Nurse Karen", germ: "Mother Cell" };
 
-export const SCENE_IDS = ["intro", "boss-5-in", "boss-5-out", "boss-10-in", "boss-10-out", "boss-15-in", "boss-15-out", "swarm-26-in", "heal-29-in"] as const;
+export const SCENE_IDS = ["prologue", "intro", "boss-5-in", "boss-5-out", "boss-10-in", "boss-10-out", "boss-15-in", "boss-15-out", "swarm-26-in", "heal-29-in"] as const;
 export type SceneId = (typeof SCENE_IDS)[number];
 
 export const SCENES: Record<SceneId, Scene> = {
+  prologue: {
+    id: "prologue",
+    title: "Prologue: becoming a nurse",
+    bg: "/map/island.jpg",
+    set: "campus",
+    music: "cutscene",
+    beats: [
+      { card: { kicker: "Prologue", title: "Graduation day", tone: "story" }, fx: "sparkle", sfx: "cut.sparkle" },
+      { line: "Four years of care plans, clinicals and 5 a.m. alarms. All of it, for one walk across this stage." },
+      { left: "you", pose: { you: "enter" }, speaker: "you", line: "They just called my name. {name}, Bachelor of Science in Nursing!", sfx: "cut.whoosh" },
+      { pose: { you: "bounce" }, fx: "caps", sfx: "cut.sparkle", speaker: "you", line: "I DID IT! Caps in the air, everybody!" },
+      { pose: { you: "shake" }, fx: "alarm", sfx: "cut.thud", line: "But one last test still stands between a graduate and a nurse..." },
+      { set: "study", card: { kicker: "Six weeks later", title: "The NCLEX", tone: "boss" }, sfx: "cut.alarm", music: "microbe" },
+      { fx: "paper", sfx: "cut.blip", speaker: "you", line: "Priorities. Delegation. Lab values. I'm answering select-all-that-apply in my sleep." },
+      { pose: { you: "dizzy" }, speaker: "you", line: "One more practice set. And maybe one more coffee." },
+      { set: "exam", music: "boss", sfx: "cut.door", line: "Exam day. Question after question after question..." },
+      { set: "exam-off", fx: "flash", sfx: "cut.gasp", line: "Then, without warning, the screen goes dark." },
+      { pose: { you: "shake" }, sfx: "cut.thud", speaker: "you", line: "Wait. Did it shut off because I passed... or because I failed?!" },
+      { set: "result", music: "heal", fx: "stamp", stamp: "PASSED", sfx: "cut.stamp", line: "The results are in." },
+      { pose: { you: "glow" }, fx: "confetti", sfx: "reward.levelup", speaker: "you", line: "{name}, RN. I'm a real nurse!" },
+      { set: "letter", right: "teddy", pose: { teddy: "enter" }, sfx: "cut.door", speaker: "teddy", line: "Congratulations, {name}! Chief Teddy here, from Sweet Care Island Hospital." },
+      { pose: { teddy: "bounce" }, fx: "hearts", sfx: "cut.sparkle", speaker: "teddy", line: "Our little patients need a nurse with a big heart. Your ferry leaves at dawn!" },
+      { set: "ferry", left: null, right: null, pose: { you: "exit", teddy: "exit" }, music: "title", sfx: "cut.whoosh", line: "Across the candy sea, past the lighthouse, an island is waiting..." },
+      { set: "island", music: "map", card: { kicker: "Welcome to", title: "Sweet Care Island", tone: "heal" }, fx: "sparkle", sfx: "map.unlock" },
+      { line: "Wards, clinics and labs, all full of patients. Walk to Ward 1 to start your first shift." },
+    ],
+  },
   intro: {
     id: "intro",
     title: "Night shift begins",
@@ -50,7 +87,7 @@ export const SCENES: Record<SceneId, Scene> = {
     music: "cutscene",
     beats: [
       { card: { kicker: "Sweet Care", title: "Your first shift", tone: "story" }, fx: "sparkle", sfx: "cut.sparkle" },
-      { right: "teddy", pose: { teddy: "enter" }, speaker: "teddy", line: "Welcome to Sweet Care, {name}! I'm Chief Teddy.", sfx: "cut.door" },
+      { right: "teddy", pose: { teddy: "enter" }, speaker: "teddy", line: "You made it, {name}! Chief Teddy, at your service. Welcome to Sweet Care.", sfx: "cut.door" },
       { speaker: "teddy", line: "Our little patients get better with candy medicine. Swap neighbours to line up three of a kind." },
       { left: "you", pose: { you: "enter" }, speaker: "you", line: "Three in a row. Got it!", sfx: "cut.whoosh" },
       { speaker: "teddy", pose: { teddy: "bounce" }, line: "Chain your matches. Big cascades wake up perks: extra moves, defib zaps, even miracles.", fx: "hearts", sfx: "perk.ready" },
@@ -176,6 +213,22 @@ export function sceneAfter(levelId: number): SceneId | null {
 /** Fills in {name}. */
 export function lineFor(line: string, name: string) {
   return line.replaceAll("{name}", name || "Nurse");
+}
+
+/** The illustrated set showing at a beat, carried forward from earlier beats. */
+export function setAt(scene: Scene, index: number): SetId | null {
+  let set: SetId | null = scene.set ?? null;
+  for (let i = 0; i <= index && i < scene.beats.length; i++) {
+    const beat = scene.beats[i]!;
+    if (beat.set !== undefined) set = beat.set;
+  }
+  return set;
+}
+
+/** Scenes the player has already watched, in story order, for the replay list in Settings. */
+export function seenScenes(): SceneId[] {
+  const seen = read();
+  return SCENE_IDS.filter((id) => seen.includes(id));
 }
 
 /** Who stands where at each beat, carried forward from earlier beats. */

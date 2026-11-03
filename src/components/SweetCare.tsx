@@ -1941,7 +1941,9 @@ export function SweetCare() {
           onBack={() => setScreen("home")}
           onStart={(look, name) => {
             patchSave((prev) => ({ ...prev, career: { ...prev.career, look, name } }), "settings");
-            openLevel(1);
+            // First time through: the opening story, which ends on the island map. After that, straight to Ward 1.
+            if (hasSeen("prologue")) openLevel(1);
+            else withScene("prologue", () => setScreen("map"));
           }}
         />
       ) : null}
@@ -1978,6 +1980,7 @@ export function SweetCare() {
           onPrefs={setPrefs}
           onHelp={() => { sfxClick(); setScreen("help"); }}
           onReset={wipeProgress}
+          onScene={(id) => { sfxClick(); setCutscene({ id, then: () => {} }); }}
         />
       ) : null}
       {screen === "rewards" ? (

@@ -571,6 +571,7 @@
 .opt-icon.sound { background: linear-gradient(160deg, #ff7ab8, #e31278); }
 .opt-icon.haptics { background: linear-gradient(160deg, #a78bfa, #7c3aed); }
 .opt-icon.play { background: linear-gradient(160deg, #6ee7b7, #10b981); }
+.opt-icon.story { background: linear-gradient(160deg, #ff9ec9, #f472b6); }
 .opt-icon.help { background: linear-gradient(160deg, #4fc3f7, #1e88e5); }
 .opt-icon.progress { background: linear-gradient(160deg, #ffd25a, #f59e0b); }
 

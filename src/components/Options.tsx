@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Check, Coins, Gift, HelpCircle, Lock, Gamepad2, Save, Smartphone, Volume2 } from "lucide-react";
+import { BookHeart, Check, Coins, Gift, HelpCircle, Lock, Gamepad2, Save, Smartphone, Volume2 } from "lucide-react";
 import { ScreenHead } from "@/components/ui/Theme";
 import { haptic, hapticsSupported } from "@/game/haptics";
 import { HINT_DELAYS, type HapticStrength, type Prefs } from "@/game/prefs";
@@ -20,6 +20,7 @@ import {
   type Wallet,
 } from "@/game/rewards";
 import { totalStars, type SaveData } from "@/game/save";
+import { SCENES, seenScenes, type SceneId } from "@/game/cutscenes";
 import { dayKey } from "@/game/shifts";
 
 function Head({ title, onBack }: { title: string; onBack: () => void }) {
@@ -30,6 +31,7 @@ const SECTION_ICON = {
   sound: Volume2,
   haptics: Smartphone,
   play: Gamepad2,
+  story: BookHeart,
   help: HelpCircle,
   progress: Save,
 } as const;
@@ -117,6 +119,7 @@ export function OptionsScreen({
   onPrefs,
   onHelp,
   onReset,
+  onScene,
 }: {
   save: SaveData;
   onBack: () => void;
@@ -126,11 +129,15 @@ export function OptionsScreen({
   onPrefs: (patch: Partial<Prefs>) => void;
   onHelp: () => void;
   onReset: () => void;
+  onScene: (id: SceneId) => void;
 }) {
   const prefs = save.prefs;
   const [confirm, setConfirm] = useState(false);
   const [canBuzz, setCanBuzz] = useState(true);
   useEffect(() => setCanBuzz(hapticsSupported()), []);
+  // Read after mount: seen scenes live in localStorage, which the server render can't see.
+  const [seen, setSeen] = useState<SceneId[]>([]);
+  useEffect(() => setSeen(seenScenes().filter((id) => id !== "prologue")), []);
   const strengths: { value: HapticStrength; label: string }[] = [
     { value: "light", label: "Light" },
     { value: "normal", label: "Normal" },
@@ -179,6 +186,19 @@ export function OptionsScreen({
             on={prefs.motion === "reduced"}
             onChange={() => onPrefs({ motion: prefs.motion === "reduced" ? "device" : "reduced" })}
           />
+        </Section>
+        <Section title="Story" icon="story">
+          <button className="btn opt-btn" type="button" onClick={() => onScene("prologue")}>Watch the opening story</button>
+          {seen.length ? (
+            <div className="opt-scenes">
+              <span className="opt-label">Replay a scene</span>
+              <div className="opt-scene-list">
+                {seen.map((id) => (
+                  <button key={id} className="btn opt-btn ghost" type="button" onClick={() => onScene(id)}>{SCENES[id].title}</button>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </Section>
         <Section title="Help" icon="help">
           <button className="btn opt-btn" type="button" onClick={onHelp}>How to care</button>
