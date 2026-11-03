@@ -1,129 +1,39 @@
-let ctx: AudioContext | null = null;
-let master: GainNode | null = null;
-let sfxBus: GainNode | null = null;
-let musicBus: GainNode | null = null;
-let musicTimer: ReturnType<typeof setInterval> | null = null;
-let step = 0;
-let soundOn = true;
-let musicOn = true;
-let started = false;
-let sfxLevel = 0.8;
-let musicLevel = 0.5;
+/**
+ * The game's sound board. The Web Audio core lives in synth.ts, background music in music.ts,
+ * and named cues for screens in sfx.ts. This file keeps the turn-loop sounds and the voice bites,
+ * and re-exports the rest so callers only import from here. See notes/sweetcare-audio.md.
+ */
 
-const MELODY = [523.25, 587.33, 659.25, 783.99, 659.25, 587.33, 523.25, 392];
+import { audioContext, buses, ensureAudio, noise, setSynthPrefs, setSynthVolumes, soundEnabled, sfxVolume, tone } from "./synth.ts";
+import { duckMusic, holdMusic, setMusicScene } from "./music.ts";
 
-function ensure(): AudioContext | null {
-  if (typeof window === "undefined") return null;
-  if (!ctx) {
-    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return null;
-    try {
-      ctx = new AC({ latencyHint: "interactive" });
-    } catch {
-      try {
-        ctx = new AC();
-      } catch {
-        return null;
-      }
-    }
-    try {
-      master = ctx.createGain();
-      sfxBus = ctx.createGain();
-      musicBus = ctx.createGain();
-      sfxBus.connect(master);
-      musicBus.connect(master);
-      master.connect(ctx.destination);
-      master.gain.value = 1;
-      sfxBus.gain.value = 0.9;
-      musicBus.gain.value = 0.12;
-    } catch {
-      ctx = null;
-      master = null;
-      sfxBus = null;
-      musicBus = null;
-      return null;
-    }
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible" && ctx && ctx.state === "suspended") void ctx.resume();
-    });
-  }
-  return ctx;
+export { playSfx, SFX_NAMES, isSfxName, audioReady, type SfxName, type SfxOptions } from "./sfx.ts";
+export { setMusicScene, setMusicIntensity, pulseMusic, duckMusic, musicScene, type MusicScene } from "./music.ts";
+
+/** Old call shape: frequency, seconds, wave, gain, delay, slide target. */
+function t(freq: number, dur: number, type: OscillatorType, gain: number, when = 0, slideTo?: number) {
+  tone(freq, dur, gain, { type, when, slideTo });
 }
 
 export function unlockAudio() {
   try {
-    const audio = ensure();
+    const audio = ensureAudio();
     if (!audio) return;
     if (audio.state === "suspended") void audio.resume().then(() => primeBites()).catch(() => {});
     else primeBites();
-    if (!started) {
-      started = true;
-      musicTimer = setInterval(musicTick, 340);
-    }
-    applyPrefs();
   } catch {
     /* sound never blocks a ward from opening */
   }
 }
 
 export function setAudioPrefs(sound: boolean, music: boolean) {
-  soundOn = sound;
-  musicOn = music;
   muteBites(!sound);
-  applyPrefs();
+  setSynthPrefs(sound, music);
 }
 
 /** Volumes run 0 to 100, as the settings sliders show them. */
 export function setVolumes(sfx: number, music: number) {
-  sfxLevel = Math.max(0, Math.min(1, sfx / 100));
-  musicLevel = Math.max(0, Math.min(1, music / 100));
-  applyPrefs();
-}
-
-function applyPrefs() {
-  if (!ctx || !sfxBus || !musicBus) return;
-  const now = ctx.currentTime;
-  sfxBus.gain.setTargetAtTime(soundOn ? Math.max(0.0001, 1.1 * sfxLevel) : 0.0001, now, 0.03);
-  musicBus.gain.setTargetAtTime(musicOn ? Math.max(0.0001, 0.22 * musicLevel) : 0.0001, now, 0.05);
-}
-
-function tone(
-  freq: number,
-  dur: number,
-  type: OscillatorType,
-  gain: number,
-  when = 0,
-  slideTo?: number,
-  bus: "sfx" | "music" = "sfx",
-) {
-  if (!ctx || !sfxBus || !musicBus) return;
-  if (bus === "sfx" && !soundOn) return;
-  if (bus === "music" && !musicOn) return;
-  const t = ctx.currentTime + when;
-  const osc = ctx.createOscillator();
-  const amp = ctx.createGain();
-  osc.type = type;
-  osc.frequency.setValueAtTime(Math.max(40, freq), t);
-  if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(40, slideTo), t + dur);
-  amp.gain.setValueAtTime(0.0001, t);
-  amp.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), t + 0.012);
-  amp.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  osc.connect(amp);
-  amp.connect(bus === "music" ? musicBus : sfxBus);
-  osc.start(t);
-  osc.stop(t + dur + 0.02);
-  osc.onended = () => {
-    osc.disconnect();
-    amp.disconnect();
-  };
-}
-
-function musicTick() {
-  if (!musicOn || !ctx || celebrating) return;
-  const freq = MELODY[step % MELODY.length]!;
-  step += 1;
-  if (step % 8 === 0) tone(freq / 2, 0.28, "triangle", 0.05, 0, undefined, "music");
-  tone(freq, 0.22, "sine", 0.045, 0, undefined, "music");
+  setSynthVolumes(sfx, music);
 }
 
 type Bite = {
@@ -146,7 +56,7 @@ const BITES = [wowBite, faahBite, bruhBite, cuteBite, rickBite];
 const liveBites: AudioBufferSourceNode[] = [];
 
 function loadBite(item: Bite): Promise<AudioBuffer | null> {
-  const audio = ensure();
+  const audio = ensureAudio();
   if (!audio) return Promise.resolve(null);
   if (item.buffer) return Promise.resolve(item.buffer);
   if (item.loading) return item.loading;
@@ -184,16 +94,18 @@ function muteBites(muted: boolean) {
 }
 
 function playBite(item: Bite) {
-  if (!soundOn) return;
-  const audio = ensure();
+  if (!soundEnabled()) return;
+  const audio = ensureAudio();
+  const master = buses().master;
   if (!audio || !master) return;
   if (audio.state === "suspended") void audio.resume();
   const start = (buffer: AudioBuffer | null) => {
-    if (!buffer || !soundOn || !master) return;
+    if (!buffer || !soundEnabled()) return;
     const src = audio.createBufferSource();
     const gain = audio.createGain();
     src.buffer = buffer;
-    gain.gain.value = item.boost * sfxLevel;
+    gain.gain.value = item.boost * sfxVolume();
+    duckMusic(0.3, Math.round(buffer.duration * 1000));
     src.connect(gain);
     gain.connect(master);
     liveBites.push(src);
@@ -220,8 +132,8 @@ export function sfxFaah() {
 
 /** Glowing orbs leaving a match. */
 export function sfxOrbFly() {
-  tone(740, 0.14, "sine", 0.05, 0, 1480);
-  tone(1180, 0.1, "triangle", 0.03, 0.03, 1960);
+  t(740, 0.14, "sine", 0.05, 0, 1480);
+  t(1180, 0.1, "triangle", 0.03, 0.03, 1960);
 }
 
 let orbPopAt = 0;
@@ -229,145 +141,107 @@ let orbPopStep = 0;
 
 /** A glitter pop when an orb lands. */
 export function sfxOrbPop() {
-  if (!ctx || !soundOn) return;
+  const ctx = audioContext();
+  if (!ctx || !soundEnabled()) return;
   const now = ctx.currentTime;
   if (now < orbPopAt) return;
   orbPopAt = now + 0.055;
   orbPopStep = (orbPopStep + 1) % 6;
   const freq = 980 + orbPopStep * 80;
-  tone(freq, 0.055, "sine", 0.05);
-  tone(freq * 1.9, 0.03, "triangle", 0.02, 0.008);
+  t(freq, 0.055, "sine", 0.05);
+  t(freq * 1.9, 0.03, "triangle", 0.02, 0.008);
 }
 
 export function sfxClick() {
-  tone(720, 0.04, "sine", 0.05);
+  t(720, 0.04, "sine", 0.05);
 }
 
 export function sfxSwap() {
-  tone(340 + Math.random() * 30, 0.06, "sine", 0.07);
+  t(340 + Math.random() * 30, 0.06, "sine", 0.07);
 }
 
 /** Two candies tumbling past each other. */
 export function sfxRoll() {
-  tone(150, 0.11, "sine", 0.12, 0, 480);
-  tone(260, 0.09, "triangle", 0.08, 0.05, 130);
-  tone(88, 0.1, "sine", 0.1, 0.15);
-  tone(360, 0.06, "triangle", 0.05, 0.2);
+  t(150, 0.11, "sine", 0.12, 0, 480);
+  t(260, 0.09, "triangle", 0.08, 0.05, 130);
+  t(88, 0.1, "sine", 0.1, 0.15);
+  t(360, 0.06, "triangle", 0.05, 0.2);
 }
 
 export function sfxBad() {
-  tone(210, 0.14, "triangle", 0.06, 0, 90);
+  t(210, 0.14, "triangle", 0.06, 0, 90);
 }
 
 export function sfxMatch(combo: number) {
   const base = 480 + combo * 36 + Math.random() * 16;
-  tone(base, 0.1, "triangle", 0.12);
-  tone(base * 1.5, 0.08, "sine", 0.05, 0.02);
-  tone(base * 1.25, 0.12, "sine", 0.06, 0.05);
+  t(base, 0.1, "triangle", 0.12);
+  t(base * 1.5, 0.08, "sine", 0.05, 0.02);
+  t(base * 1.25, 0.12, "sine", 0.06, 0.05);
 }
 
 /** A candy landing on Nurse Karen. */
 export function sfxBossHit() {
-  tone(160, 0.07, "square", 0.05, 0, 70);
-  tone(90, 0.09, "sine", 0.06);
+  t(160, 0.07, "square", 0.05, 0, 70);
+  t(90, 0.09, "sine", 0.06);
 }
 
 /** Karen winding up. Two rising beeps, like a monitor alarm. */
 export function sfxBossWarn() {
-  tone(660, 0.09, "square", 0.04);
-  tone(880, 0.12, "square", 0.045, 0.13);
+  t(660, 0.09, "square", 0.04);
+  t(880, 0.12, "square", 0.045, 0.13);
 }
 
 /** Karen's attack landing. */
 export function sfxBossStrike() {
-  tone(120, 0.18, "sawtooth", 0.06, 0, 55);
-  tone(70, 0.22, "sine", 0.09, 0.02);
+  t(120, 0.18, "sawtooth", 0.06, 0, 55);
+  t(70, 0.22, "sine", 0.09, 0.02);
 }
 
 /** A big hit broke her windup. */
 export function sfxInterrupt() {
-  tone(520, 0.08, "triangle", 0.08, 0, 1040);
-  tone(1320, 0.12, "sine", 0.05, 0.06, 1760);
+  t(520, 0.08, "triangle", 0.08, 0, 1040);
+  t(1320, 0.12, "sine", 0.05, 0.06, 1760);
 }
 
 /** She enters a new phase. A falling growl and a sting on top. */
 export function sfxBossPhase() {
-  tone(220, 0.45, "sawtooth", 0.05, 0, 82);
-  tone(330, 0.3, "square", 0.03, 0.05, 110);
-  tone(988, 0.16, "triangle", 0.05, 0.32);
+  t(220, 0.45, "sawtooth", 0.05, 0, 82);
+  t(330, 0.3, "square", 0.03, 0.05, 110);
+  t(988, 0.16, "triangle", 0.05, 0.32);
 }
 
 /** Glass breaking, then a wet catch. */
 export function sfxShatter() {
-  const audio = ctx;
-  if (!audio || !sfxBus || !soundOn) return;
-  const dur = 0.22;
-  const buffer = audio.createBuffer(1, Math.floor(audio.sampleRate * dur), audio.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    const env = (1 - i / data.length) ** 2;
-    data[i] = (Math.random() * 2 - 1) * env;
-  }
-  const src = audio.createBufferSource();
-  src.buffer = buffer;
-  const hp = audio.createBiquadFilter();
-  hp.type = "highpass";
-  hp.frequency.value = 1800;
-  const amp = audio.createGain();
-  amp.gain.value = 0.42;
-  src.connect(hp);
-  hp.connect(amp);
-  amp.connect(sfxBus);
-  src.start();
-  tone(1480, 0.06, "square", 0.04, 0, 400);
-  tone(2100, 0.05, "sine", 0.035, 0.03, 200);
-  tone(220, 0.16, "sine", 0.06, 0.08);
+  noise(0.22, 0.42, { filter: "highpass", freq: 1800 });
+  t(1480, 0.06, "square", 0.04, 0, 400);
+  t(2100, 0.05, "sine", 0.035, 0.03, 200);
+  t(220, 0.16, "sine", 0.06, 0.08);
 }
 
 /** A dry crack when bones line up. */
 export function sfxCrack() {
-  const audio = ctx;
-  if (!audio || !sfxBus || !soundOn) return;
-  const dur = 0.16;
-  const buffer = audio.createBuffer(1, Math.floor(audio.sampleRate * dur), audio.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < data.length; i++) {
-    const env = (1 - i / data.length) ** 3;
-    data[i] = (Math.random() * 2 - 1) * env;
-  }
-  const src = audio.createBufferSource();
-  src.buffer = buffer;
-  const hp = audio.createBiquadFilter();
-  hp.type = "bandpass";
-  hp.frequency.value = 1600;
-  hp.Q.value = 0.6;
-  const amp = audio.createGain();
-  amp.gain.value = 0.5;
-  src.connect(hp);
-  hp.connect(amp);
-  amp.connect(sfxBus);
-  src.start();
-  tone(72, 0.1, "sine", 0.1);
-  tone(240, 0.05, "square", 0.035, 0.015, 80);
+  noise(0.16, 0.5, { filter: "bandpass", freq: 1600, q: 0.6 });
+  t(72, 0.1, "sine", 0.1);
+  t(240, 0.05, "square", 0.035, 0.015, 80);
 }
 
 /** A chain that has gone past the wow and is still falling. */
 export function sfxDeep(combo: number) {
   const base = 140 + combo * 18;
-  tone(base, 0.22, "sawtooth", 0.045, 0, Math.max(50, base / 2));
-  tone(base * 2, 0.14, "triangle", 0.07, 0.06);
-  tone(base * 3, 0.18, "sine", 0.05, 0.12, base * 4);
+  t(base, 0.22, "sawtooth", 0.045, 0, Math.max(50, base / 2));
+  t(base * 2, 0.14, "triangle", 0.07, 0.06);
+  t(base * 3, 0.18, "sine", 0.05, 0.12, base * 4);
 }
 
 export function sfxSpecial() {
-  [523, 659, 784, 1046].forEach((freq, i) => tone(freq, 0.14, "triangle", 0.08, i * 0.045));
+  [523, 659, 784, 1046].forEach((freq, i) => t(freq, 0.14, "triangle", 0.08, i * 0.045));
 }
 
 /** A cute summon: low whoosh, then a bright little choir. */
 export function sfxSummon() {
-  tone(98, 0.32, "triangle", 0.08, 0, 52);
-  tone(196, 0.22, "sine", 0.06, 0.04, 440);
-  [392, 494, 587, 784, 988].forEach((freq, i) => tone(freq, 0.16, "triangle", 0.07, 0.12 + i * 0.06));
+  t(98, 0.32, "triangle", 0.08, 0, 52);
+  t(196, 0.22, "sine", 0.06, 0.04, 440);
+  [392, 494, 587, 784, 988].forEach((freq, i) => t(freq, 0.16, "triangle", 0.07, 0.12 + i * 0.06));
 }
 
 let celebrating = false;
@@ -388,19 +262,20 @@ const FANFARE: number[][] = [
 /** A looping celebration tune. Background music pauses until this stops. */
 export function startCelebration() {
   if (celebrating) return;
-  const audio = ensure();
-  if (!audio || !soundOn) return;
+  const audio = ensureAudio();
+  if (!audio || !soundEnabled()) return;
   celebrating = true;
+  holdMusic(true);
   const run = () => {
     if (!celebrating || fanfareTimer) return;
     const hit = () => {
-      if (!celebrating || !soundOn) return;
+      if (!celebrating || !soundEnabled()) return;
       const chord = FANFARE[fanfareStep % FANFARE.length]!;
       fanfareStep += 1;
-      tone(chord[0]!, 0.48, "triangle", 0.12);
-      tone(chord[1]!, 0.42, "sine", 0.07, 0.04);
-      tone(chord[2]!, 0.5, "sine", 0.09, 0.07);
-      tone(chord[2]! * 2, 0.2, "triangle", 0.04, 0.1);
+      t(chord[0]!, 0.48, "triangle", 0.12);
+      t(chord[1]!, 0.42, "sine", 0.07, 0.04);
+      t(chord[2]!, 0.5, "sine", 0.09, 0.07);
+      t(chord[2]! * 2, 0.2, "triangle", 0.04, 0.1);
     };
     hit();
     fanfareTimer = setInterval(hit, 520);
@@ -414,14 +289,15 @@ export function startCelebration() {
 
 export function stopCelebration() {
   celebrating = false;
+  holdMusic(false);
   if (fanfareTimer) clearInterval(fanfareTimer);
   fanfareTimer = null;
 }
 
 export function sfxWin() {
-  [523, 659, 784, 1046, 784, 1046, 1318].forEach((freq, i) => tone(freq, 0.22, "sine", 0.1, i * 0.09));
-  tone(1568, 0.4, "triangle", 0.05, 0.72);
-  tone(1046, 0.28, "sine", 0.04, 0.84, 2093);
+  [523, 659, 784, 1046, 784, 1046, 1318].forEach((freq, i) => t(freq, 0.22, "sine", 0.1, i * 0.09));
+  t(1568, 0.4, "triangle", 0.05, 0.72);
+  t(1046, 0.28, "sine", 0.04, 0.84, 2093);
 }
 
 export function sfxLose() {
@@ -435,14 +311,13 @@ export function sfxGift(levelId: number) {
 }
 
 export function stopMusic() {
-  if (musicTimer) clearInterval(musicTimer);
-  musicTimer = null;
+  setMusicScene("silence");
 }
 
 /** Coins dropping into the wallet. */
 export function sfxCoins() {
-  [1318, 1568, 1976].forEach((freq, i) => tone(freq, 0.09, "triangle", 0.06, i * 0.07));
-  tone(2637, 0.16, "sine", 0.03, 0.22);
+  [1318, 1568, 1976].forEach((freq, i) => t(freq, 0.09, "triangle", 0.06, i * 0.07));
+  t(2637, 0.16, "sine", 0.03, 0.22);
 }
 
 /** A player bumping into a hazard. */

@@ -84,7 +84,16 @@ import {
   startCelebration,
   stopCelebration,
   unlockAudio,
+  playSfx,
+  pulseMusic,
+  setMusicIntensity,
+  setMusicScene,
+  type MusicScene,
 } from "@/game/audio";
+import { createPerks, judgeMove, PERKS, powersIn, type PerkState, type PerkId } from "@/game/perks";
+import { hasSeen, markSeen, resetSeen, sceneAfter, sceneBefore, SCENE_IDS, SCENES, type SceneId } from "@/game/cutscenes";
+import { Cutscene } from "@/components/Cutscene";
+import { PerkFx, type PerkFlash } from "@/components/PerkFx";
 import { GIFT_CARDS, cardForLevel, rememberGift } from "@/game/cards";
 import { haptic, setHapticStrength, setHapticsPref } from "@/game/haptics";
 import { bossTierFor, createBoss, hitBoss, MOVE_LABEL, shoveBoss as shoveKaren, stepBoss, windupProgress, type BossEvent, type BossState } from "@/game/boss";
@@ -204,6 +213,22 @@ interface Model {
   cleanedThisMove: number;
   movesMade: number;
   feversTreated: number;
+  /** Combo perk cooldowns and the Bedside streak. See perks.ts. */
+  perks: PerkState;
+  /** The perk effect on screen, if one just fired. */
+  perkFx: PerkFlash | null;
+}
+
+/** Background music for a screen, and for a ward by its type. */
+function musicFor(screen: Screen, level: LevelDef | null | undefined): MusicScene {
+  if (screen === "play" && level) {
+    if (level.bossHp) return "boss";
+    if (level.encounter === "microbe") return "microbe";
+    if (level.encounter === "heal") return "heal";
+    return "ward";
+  }
+  if (screen === "map" || screen === "journey") return "map";
+  return "title";
 }
 
 type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "rewards" | "cast" | "dev" | "creator";
@@ -337,6 +362,7 @@ export function SweetCare() {
   const [creatorUid, setCreatorUid] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [logOpen, setLogOpen] = useState(false);
+  const [cutscene, setCutscene] = useState<{ id: SceneId; then: () => void } | null>(null);
   const forcedOpen = useRef(0);
   const saveRef = useRef(save);
   saveRef.current = save;
@@ -382,6 +408,23 @@ export function SweetCare() {
       stopCelebration();
     };
   }, []);
+
+  // Browsers only start audio after a gesture. The first tap anywhere wakes it, so the title theme can play.
+  useEffect(() => {
+    const wake = () => unlockAudio();
+    window.addEventListener("pointerdown", wake, { once: true });
+    window.addEventListener("keydown", wake, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", wake);
+      window.removeEventListener("keydown", wake);
+    };
+  }, []);
+
+  const playingLevel = screen === "play" ? modelRef.current?.level : null;
+  useEffect(() => {
+    setMusicScene(cutscene ? SCENES[cutscene.id].music : musicFor(screen, playingLevel));
+    if (!cutscene) setMusicIntensity(playingLevel?.bossHp ? 0.3 : 0);
+  }, [screen, playingLevel, cutscene]);
 
   useLayoutEffect(() => {
     if (screen !== "play") return;
@@ -486,6 +529,7 @@ export function SweetCare() {
     current.curtain = "next";
     stopCelebration();
     bump();
+    if (current.outcome === "win" && !current.level.custom) withScene(sceneAfter(current.level.id), () => {});
   }
 
   function toggleSound() {
@@ -527,6 +571,7 @@ export function SweetCare() {
   }
 
   function wipeProgress() {
+    resetSeen();
     patchSave((prev) => resetProgress(prev), "checkpoint");
     setScreen("home");
   }
@@ -621,7 +666,29 @@ export function SweetCare() {
     bump();
   }
 
+  /** Plays a story scene once, then carries on. Seen scenes are skipped. */
+  function withScene(id: SceneId | null, then: () => void) {
+    if (!id || hasSeen(id)) {
+      then();
+      return;
+    }
+    setCutscene({ id, then });
+  }
+
+  function endScene() {
+    const current = cutscene;
+    if (!current) return;
+    markSeen(current.id);
+    setCutscene(null);
+    current.then();
+  }
+
   function startLevel(id: number, custom?: LevelDef) {
+    const story = custom ? null : sceneBefore(id);
+    if (story && !hasSeen(story)) {
+      withScene(story, () => startLevel(id, custom));
+      return;
+    }
     try {
       unlockAudio();
       sfxClick();
@@ -710,6 +777,8 @@ export function SweetCare() {
       cleanedThisMove: 0,
       movesMade: 0,
       feversTreated: 0,
+      perks: createPerks(),
+      perkFx: null,
     };
     model.contagionTotal = countLayer(model.contagion);
     if (level.swarm) {
@@ -927,6 +996,7 @@ export function SweetCare() {
       say(model, event.phase === 1 ? "Karen is fuming!" : "Karen lost it!");
       model.flash = "summon";
       sfxBossPhase();
+      setMusicIntensity(0.3 + event.phase * 0.35);
       particleRef.current?.bossBurst("phase");
       window.setTimeout(() => {
         const current = modelRef.current;
@@ -992,9 +1062,10 @@ export function SweetCare() {
     }
   }
 
-  async function playPlan(run: number, plan: ClearPlan) {
+  /** Plays one clear step. Returns the points it scored. */
+  async function playPlan(run: number, plan: ClearPlan): Promise<number> {
     const model = modelRef.current;
-    if (!model || runRef.current !== run || model.outcome) return;
+    if (!model || runRef.current !== run || model.outcome) return 0;
     const jellyBroken = breakJelly(model.jelly, plan.removals);
     const cleaned = cleanContagion(model.contagion, plan.removals);
     const treated = treatFevers(model.board, plan);
@@ -1158,7 +1229,7 @@ export function SweetCare() {
       bump();
     }, plan.banner === "Wow!" || plan.banner === "Faaah!" ? 1700 : 720);
     await wait(reducedMotion() ? 40 : 250);
-    if (runRef.current !== run || !modelRef.current) return;
+    if (runRef.current !== run || !modelRef.current) return gained;
     const pre = new Map<number, number>();
     for (let r = 0; r < model.board.length; r++) {
       for (let c = 0; c < model.board[0]!.length; c++) {
@@ -1190,11 +1261,12 @@ export function SweetCare() {
     model.view = readView(model.board, new Set(), born, reducedMotion() ? undefined : lift);
     renderNow();
     await frames(2);
-    if (runRef.current !== run || !modelRef.current) return;
+    if (runRef.current !== run || !modelRef.current) return gained;
     model.animate = true;
     model.view = readView(model.board, new Set(), born);
     bump();
     await wait(reducedMotion() ? 40 : 320);
+    return gained;
   }
 
   /** Evolves a rolled ward in the background so it is ready when the player gets there. */
@@ -1447,42 +1519,107 @@ export function SweetCare() {
     bump();
   }
 
-  /** Plays a move's clears and cascades, and returns how many clear steps it took. */
-  async function runClears(run: number, first: ClearPlan | null, comboStart: number): Promise<number> {
+  /**
+   * Plays a move's clears and cascades, and returns how many clear steps it took.
+   * With `judge`, the finished move is judged for combo perks (swaps only, not boosters).
+   */
+  async function runClears(run: number, first: ClearPlan | null, comboStart: number, judge = false): Promise<number> {
     let combo = comboStart;
     let plan = first;
     let celebrated = false;
     let yelled = false;
     let step = 0;
-    while (plan && runRef.current === run) {
-      step += 1;
-      const depth = Math.max(step, plan.combo);
-      if (depth >= 7 && !yelled) {
-        yelled = true;
-        celebrated = true;
-        plan.banner = "Faaah!";
-        unlockAudio();
-        sfxFaah();
-      } else if (depth >= 5 && !celebrated) {
-        celebrated = true;
-        plan.banner = "Wow!";
-        unlockAudio();
-        sfxWow();
-        particleRef.current?.stars();
+    let powers = 0;
+    let gained = 0;
+    let judged = !judge;
+    let moveSteps = 0;
+    for (;;) {
+      while (plan && runRef.current === run) {
+        step += 1;
+        const depth = Math.max(step, plan.combo);
+        if (depth >= 7 && !yelled) {
+          yelled = true;
+          celebrated = true;
+          plan.banner = "Faaah!";
+          unlockAudio();
+          sfxFaah();
+        } else if (depth >= 5 && !celebrated) {
+          celebrated = true;
+          plan.banner = "Wow!";
+          unlockAudio();
+          sfxWow();
+          particleRef.current?.stars();
+        }
+        if (depth >= 2) pulseMusic(Math.min(1, depth / 6));
+        const current = modelRef.current;
+        if (current) {
+          current.maxCombo = Math.max(current.maxCombo, Math.max(step, plan.combo));
+          powers += powersIn(current.board, plan);
+        }
+        gained += await playPlan(run, plan);
+        if (runRef.current !== run || !modelRef.current) return step;
+        combo += 1;
+        plan = planFromMatches(modelRef.current.board, combo);
       }
-      const current = modelRef.current;
-      if (current) current.maxCombo = Math.max(current.maxCombo, Math.max(step, plan.combo));
-      await playPlan(run, plan);
+      if (judged || runRef.current !== run) break;
+      judged = true;
+      moveSteps = step;
+      const model = modelRef.current;
+      if (!model || model.outcome) break;
+      plan = firePerks(model, { steps: step, powers, score: gained });
+      if (!plan) break;
+      await wait(reducedMotion() ? 40 : 520);
       if (runRef.current !== run || !modelRef.current) return step;
-      combo += 1;
-      plan = planFromMatches(modelRef.current.board, combo);
     }
     if (modelRef.current && runRef.current === run) {
       modelRef.current.dive = 0;
       bump();
     }
     await finish(run);
-    return step;
+    return judge ? moveSteps : step;
+  }
+
+  /** Judges a finished move for combo perks, shows the effect, and returns a follow-up clear if one fired. */
+  function firePerks(model: Model, stats: { steps: number; powers: number; score: number }): ClearPlan | null {
+    const result = judgeMove(model.perks, stats, model.board, model.rng, model.mask);
+    if (result.bonus > 0) {
+      model.score += result.bonus;
+      const floatId = ++seq.current;
+      model.floats = [...model.floats.slice(-4), { id: floatId, text: `+${result.bonus}`, r: model.level.rows / 2 - 0.5, c: model.level.cols / 2 - 0.5 }];
+      window.setTimeout(() => {
+        const current = modelRef.current;
+        if (!current) return;
+        current.floats = current.floats.filter((item) => item.id !== floatId);
+        bump();
+      }, 900);
+      if (!result.perk) playSfx("perk.bonus");
+    }
+    model.moves += result.extraMoves;
+    const shown: PerkId | null = result.perk ?? (result.armedBedside ? "bedside" : null);
+    if (shown) {
+      const key = ++seq.current;
+      model.perkFx = { id: shown, key, zap: result.zap, planted: result.planted };
+      playSfx(`perk.${shown}`);
+      if (result.armedBedside && result.perk) playSfx("perk.bedside", { delay: 0.5, gain: 0.8 });
+      if (shown === "defib" || shown === "miracle") haptic("power");
+      else haptic("special");
+      if (shown === "miracle") particleRef.current?.stars();
+      if (result.planted.length > 0) {
+        const ids = result.planted.flatMap((pos) => {
+          const tile = model.board[pos.r]?.[pos.c];
+          return tile ? [tile.id] : [];
+        });
+        model.view = readView(model.board, new Set(), new Set(ids));
+        liquidRef.current?.splash(result.planted, 1.2);
+      }
+      window.setTimeout(() => {
+        const current = modelRef.current;
+        if (current?.perkFx?.key === key) current.perkFx = null;
+        bump();
+      }, 1900);
+    }
+    bump();
+    return result.plan;
   }
 
   async function playSwap(a: Pos, b: Pos) {
@@ -1547,7 +1684,7 @@ export function SweetCare() {
     model.moves -= 1;
     model.rolls = [];
     bump();
-    const steps = await runClears(run, planAfterSwap(model.board, a, b, 1), 1);
+    const steps = await runClears(run, planAfterSwap(model.board, a, b, 1), 1, true);
     if (runRef.current === run && modelRef.current) {
       trackAssist(modelRef.current, modelRef.current.level.id, steps >= 2);
       riseFlood(modelRef.current);
@@ -1742,6 +1879,7 @@ export function SweetCare() {
             setScreen("profile");
           }}
           onUnlock={grantDevKit}
+          onScene={(id) => setCutscene({ id, then: () => {} })}
           notes={notes}
         />
       ) : null}
@@ -1803,6 +1941,7 @@ export function SweetCare() {
           }}
         />
       ) : null}
+      {cutscene ? <Cutscene id={cutscene.id} name={save.career.name} portraitSrc={portrait(save.career)} onDone={endScene} /> : null}
     </main>
   );
 }
@@ -1938,10 +2077,12 @@ function DevMenu({
   onUnlock,
   onProfile,
   onCase,
+  onScene,
   notes,
 }: {
   onBack: () => void;
   onLevel: (id: number) => void;
+  onScene: (id: SceneId) => void;
   onUnlock: () => void;
   onProfile: () => void;
   onCase: () => void;
@@ -1962,6 +2103,12 @@ function DevMenu({
         </div>
         <h3>Launch log</h3>
         <LaunchLog notes={notes} />
+        <h3>Story scenes</h3>
+        <div className="stack">
+          {SCENE_IDS.map((id) => (
+            <button key={id} className="btn secondary" type="button" onClick={() => onScene(id)}>{SCENES[id].title}</button>
+          ))}
+        </div>
         <h3>Levels</h3>
         <div className="stack">
           {LEVELS.map((level) => (
@@ -2170,6 +2317,12 @@ function Help({ onBack }: { onBack: () => void }) {
             <div className="rule" key={rule.src}><img src={rule.src} alt="" /><p>{rule.text}</p></div>
           ))}
         </div>
+        <h3 className="help-sub">Combo perks</h3>
+        <div className="rules">
+          {Object.values(PERKS).map((perk) => (
+            <div className="rule" key={perk.id}><img src={perk.icon} alt="" /><p><b>{perk.name}</b> · {perk.trigger}: {perk.effect}.</p></div>
+          ))}
+        </div>
         <button className="btn" type="button" onClick={onBack}>Got it</button>
       </div>
     </div>
@@ -2288,7 +2441,7 @@ function Play({
   const grid = (
     <>
       <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} holes={model.mask} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
-      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}`} style={{ width: arena ? "100%" : side, height: boardH }}>
+      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}${model.perks.armed ? " bedside" : ""}`} style={{ width: arena ? "100%" : side, height: boardH }}>
         <div className="board" ref={boardRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
           <div className={`pieces${model.animate ? " anim" : ""}`}>
             {model.view.map((tile) => {
@@ -2315,6 +2468,8 @@ function Play({
             <span key={item.id} className="floater" style={{ left: `${((item.c + 0.5) / cols) * 100}%`, top: `${((item.r + 0.5) / rows) * 100}%` }}>{item.text}</span>
           ))}
           {model.flash ? <div className={`fx-flash ${model.flash}`} /> : null}
+          {model.perkFx ? <PerkFx fx={model.perkFx} rows={rows} cols={cols} /> : null}
+          {model.perks.armed && !model.perkFx ? <span className="bedside-chip">Bedside +50%</span> : null}
           {model.banner ? <div className="banner">{model.banner}</div> : null}
           {model.countdown ? (
             <div className="count-down" aria-live="assertive"><b key={model.countdown} className={/\d/.test(model.countdown) ? "" : "word"}>{model.countdown}</b></div>
