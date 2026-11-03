@@ -3,6 +3,8 @@ import { flushSync } from "react-dom";
 import { ChevronLeft, Coins, Gift, Pause, Star, Volume2, VolumeX } from "lucide-react";
 import { Cheer, CountUp, DocAvatar, portrait, ProfileScreen, SketchModel } from "@/components/Profile";
 import { applyRound, ACHIEVEMENTS, rankTitle } from "@/game/profile";
+import { applyCare, challengeFor, challengeMet, stageRewards, wardPerks, type Challenge, type EvolveResult } from "@/game/evolution";
+import { CareCard, ChallengeChip, EvolutionCutscene, EvolvedAvatar } from "@/components/Evolution";
 import {
   KINDS,
   adjacent,
@@ -96,7 +98,7 @@ import { evolveWardAhead, formOffset, isRolledWard, lockedWard, pushForm, wardFo
 import { attemptFor, continueLevel, loadSave, recordWin, releaseAttempt, rememberOpened, resetProgress, totalStars, writeSave, defaultSave, type SaveData } from "@/game/save";
 import { dayKey, shiftForDate } from "@/game/shifts";
 import { applyMotionPref, motionReduced, type Prefs } from "@/game/prefs";
-import { lossPayout, payWin, rewardsWaiting, spendFromBag, winPayout, type BoosterId, type Payout } from "@/game/rewards";
+import { grant, lossPayout, payWin, rewardsWaiting, spendFromBag, winPayout, type BoosterId, type Payout } from "@/game/rewards";
 import { OptionsScreen, RewardsScreen } from "@/components/Options";
 import { installErrorLog, note, readNotes, subscribeNotes, type Note } from "@/game/log";
 import { applyLayout } from "@/game/layout";
@@ -204,6 +206,16 @@ interface Model {
   cleanedThisMove: number;
   movesMade: number;
   feversTreated: number;
+  /** Optional bonus goal for this ward (src/game/evolution.ts). */
+  challenge: Challenge | null;
+  /** Boosters spent this ward, for the "no boosters" challenge. */
+  boostersUsed: number;
+  /** Moves the Second wind ability still has to give this ward. */
+  secondWind: number;
+  /** Care points and evolution result of the finished round. */
+  care: (EvolveResult & { before: number; challengeDone: boolean }) | null;
+  /** The evolution cutscene is waiting to play over the result card. */
+  evolving: boolean;
 }
 
 type Screen = "home" | "map" | "help" | "play" | "journey" | "profile" | "settings" | "rewards" | "cast" | "dev" | "creator";
@@ -296,6 +308,20 @@ function exchange(model: Model, a: Pos, b: Pos) {
   first.c = second.c;
   second.r = r;
   second.c = c;
+}
+
+/** Triage eye ability: one striped power on a plain tile, away from the edges when it can. */
+function plantStripe(board: Board, rng: Rng) {
+  const spots: NonNullable<Board[number][number]>[] = [];
+  for (let r = 1; r < board.length - 1; r++) {
+    for (let c = 1; c < (board[r]?.length ?? 0) - 1; c++) {
+      const tile = board[r]![c];
+      if (tile && !tile.special && !tile.wrap) spots.push(tile);
+    }
+  }
+  if (spots.length === 0) return;
+  const pick = spots[Math.floor(rng() * spots.length)]!;
+  pick.special = rng() < 0.5 ? "row" : "col";
 }
 
 function plantRainbow(model: Model) {
@@ -467,6 +493,7 @@ export function SweetCare() {
           decor: next.decor ?? [],
           prefs: next.prefs,
           wallet: next.wallet,
+          evolution: next.evolution,
         };
         diskRef.current = stored;
         writeSave(stored);
@@ -534,6 +561,7 @@ export function SweetCare() {
   /** Spend one booster. The free one goes first, then the bag pays. */
   function drawBooster(model: Model, which: BoosterId) {
     model.boosters[which] -= 1;
+    model.boostersUsed += 1;
     if (model.boosters[which] < model.bagStart[which]) {
       patchSave((prev) => ({ ...prev, wallet: spendFromBag(prev.wallet, which) }), "settings");
     }
@@ -655,6 +683,11 @@ export function SweetCare() {
       if (mid) mid.special = level.startSpecial;
     }
     const jelly = makeJelly(level);
+    // Evolution abilities. Custom levels play exactly as built, so the creator stays honest.
+    const perks = custom ? wardPerks({ ...saveRef.current.evolution, stage: 0 }) : wardPerks(saveRef.current.evolution);
+    if (perks.startStripe) plantStripe(board, rng);
+    const encounterWard = Boolean(level.bossHp || level.encounter);
+    const challenge = custom ? null : challengeFor({ levelId: level.id, clears: saveRef.current.clears[String(level.id)] ?? 0, encounter: encounterWard, moves: level.moves });
     const model: Model = {
       level,
       board,
@@ -664,7 +697,7 @@ export function SweetCare() {
       jellyTotal: countJelly(jelly),
       rng,
       score: 0,
-      moves: level.moves,
+      moves: level.moves + perks.extraMoves,
       collected: freshCollected(),
       boosters: { blast: 1 + saveRef.current.wallet.bag.blast, stripe: 1 + saveRef.current.wallet.bag.stripe, aid: 1 + saveRef.current.wallet.bag.aid },
       bagStart: { ...saveRef.current.wallet.bag },
@@ -710,6 +743,11 @@ export function SweetCare() {
       cleanedThisMove: 0,
       movesMade: 0,
       feversTreated: 0,
+      challenge,
+      boostersUsed: 0,
+      secondWind: perks.secondWind,
+      care: null,
+      evolving: false,
     };
     model.contagionTotal = countLayer(model.contagion);
     if (level.swarm) {
@@ -1246,10 +1284,36 @@ export function SweetCare() {
         })
       : lossPayout();
     model.payout = payout;
+    const challengeDone = model.challenge
+      ? challengeMet(model.challenge, {
+          won,
+          maxCombo: model.maxCombo,
+          movesLeft: Math.max(0, model.moves),
+          stars: won ? model.stars : 0,
+          seconds: elapsed / 1000,
+          boostersUsed: model.boostersUsed,
+          destroyed,
+        })
+      : false;
+    const care = applyCare(prev.evolution, {
+      won,
+      stars: won ? model.stars : 0,
+      prevStars: prev.stars[key] ?? 0,
+      maxCombo: model.maxCombo,
+      movesLeft: Math.max(0, model.moves),
+      boss: Boolean(model.level.bossHp || model.level.encounter === "microbe"),
+      destroyed,
+      challenge: model.challenge,
+      challengeDone,
+    });
+    model.care = { ...care, before: prev.evolution.xp, challengeDone };
+    model.evolving = care.reached.length > 0;
+    const promotion = stageRewards(care.reached);
     patchSave((current) => {
       const base = won ? releaseAttempt(recordWin(current, model.level.id, model.stars, model.score, elapsed), model.level.id) : current;
-      const wallet = won ? payWin(current.wallet, payout, today) : { ...current.wallet, coins: current.wallet.coins + payout.total, earned: current.wallet.earned + payout.total };
-      return { ...base, career: applied.career, wallet, form: formEntry ? pushForm(current.form, formEntry) : current.form };
+      const paid = won ? payWin(current.wallet, payout, today) : { ...current.wallet, coins: current.wallet.coins + payout.total, earned: current.wallet.earned + payout.total };
+      const wallet = care.reached.length ? grant(paid, promotion) : paid;
+      return { ...base, career: applied.career, wallet, evolution: care.evolution, form: formEntry ? pushForm(current.form, formEntry) : current.form };
     }, won ? "checkpoint" : "session");
     // Start shaping the next ward while the result card is up.
     window.setTimeout(() => evolveNext(won ? model.level.id + 1 : model.level.id), 600);
@@ -1407,6 +1471,19 @@ export function SweetCare() {
       closeRound(model, true, elapsed);
       bump();
       return;
+    }
+    if (model.moves <= 0 && model.secondWind > 0) {
+      // Healer ability: one rescue per ward.
+      model.moves += model.secondWind;
+      model.secondWind = 0;
+      say(model, `Second wind! +${model.moves} moves`, 1600);
+      particleRef.current?.stars();
+      haptic("special");
+      try {
+        sfxSpecial();
+      } catch (error) {
+        note("Audio", error);
+      }
     }
     if (model.moves <= 0) {
       model.elapsed = Math.max(0, Date.now() - model.startedAt);
@@ -1890,7 +1967,7 @@ function Home({ save, onNew, onContinue, onMap, onSettings, onRewards, onDev, on
           {save.sound ? <Volume2 /> : <VolumeX />}
         </button>
         <img className="header-title" src="/ui/crush-title.png" alt="Sweet Care Crush" />
-        <button className="avatar-btn" type="button" onClick={onProfile} aria-label={`${save.career.name} profile`}>
+        <button className={`avatar-btn evo-ring evo-ring-s${save.evolution.stage}`} type="button" onClick={onProfile} aria-label={`${save.career.name} profile`}>
           <DocAvatar career={save.career} />
         </button>
       </div>
@@ -2335,7 +2412,7 @@ function Play({
           <button className="icon-btn" type="button" onClick={onSound} aria-label={save.sound ? "Mute sound" : "Sound on"}>{save.sound ? <Volume2 /> : <VolumeX />}</button>
         </span>
         <img className="header-title" src="/ui/crush-title.png" alt="Sweet Care Crush" />
-        <button className="avatar-btn" type="button" onClick={onProfile} aria-label={`${save.career.name} profile`}>
+        <button className={`avatar-btn evo-ring evo-ring-s${save.evolution.stage}`} type="button" onClick={onProfile} aria-label={`${save.career.name} profile`}>
           <DocAvatar career={save.career} />
         </button>
       </div>
@@ -2368,6 +2445,12 @@ function Play({
           <div className="mv-col"><span className="kicker">Moves:</span><strong>{model.moves}</strong></div>
         </div>
       </section>
+      {model.challenge && !model.outcome ? (
+        <ChallengeChip
+          challenge={model.challenge}
+          done={challengeMet(model.challenge, { won: false, maxCombo: model.maxCombo, movesLeft: model.moves, stars: 0, seconds: 0, boostersUsed: model.boostersUsed, destroyed: KINDS.reduce((sum, kind) => sum + model.collected[kind], 0) })}
+        />
+      ) : null}
       <ComboCounter live={model.dive} best={model.maxCombo} />
       {boss ? (
         <div className={`boss-strip phase-${boss.phase}${model.sting > 0 ? " stung" : ""}`}>
@@ -2816,6 +2899,18 @@ function Outro({
   const present = giftPhase === "box" ? <SecretGiftButton onOpen={openGift} /> : null;
   const reveal = giftPhase === "open" ? <CardReveal levelId={model.level.id} onClose={() => setGiftPhase("kept")} /> : null;
   const dock = present ? <div className="gift-dock">{present}</div> : null;
+  const [evolving, setEvolving] = useState(model.evolving);
+  const cutscene = evolving && model.care ? (
+    <EvolutionCutscene
+      career={save.career}
+      from={model.care.reached[0]!.index - 1}
+      to={model.care.reached}
+      onDone={() => {
+        model.evolving = false;
+        setEvolving(false);
+      }}
+    />
+  ) : null;
   if (model.curtain !== "next") {
     return (
       <div className={present ? "outro card-hold has-gift" : "outro card-hold"}>
@@ -2837,21 +2932,26 @@ function Outro({
             </div>
           </div>
           {model.payout ? <PayoutCard payout={model.payout} /> : null}
+          {model.care ? <CareCard points={model.care.points} before={model.care.before} after={model.care.evolution} challenge={model.challenge} challengeDone={model.care.challengeDone} /> : null}
           {model.badges.length > 0 ? <BadgeFlash badges={model.badges} /> : <p className="summary-note">No badges this round.</p>}
           <button className="btn" type="button" onClick={onAdvance}>Next</button>
         </div>
         {dock}
         {reveal}
+        {cutscene}
       </div>
     );
   }
   return (
     <div className={present ? "outro after has-gift" : "outro after"}>
-      <DocAvatar career={save.career} className="after-doc" />
+      <EvolvedAvatar career={save.career} evolution={save.evolution} className="after-doc" />
       <h2>{won ? model.level.name : "Out of moves"}</h2>
       <Stars n={won ? model.stars : 0} />
       {model.savedNow ? (
         <p className="save-banner">Progress saved.</p>
+      ) : null}
+      {model.care ? (
+        <p className="care-banner">+{model.care.points.total} CP{model.care.evolution.streak > 1 ? ` · ${model.care.evolution.streak} wins in a row` : ""}</p>
       ) : null}
       {model.payout ? (
         <p className="coin-banner"><Coins className="coin-icon" aria-hidden />+{model.payout.total} coins · {save.wallet.coins} in your purse</p>

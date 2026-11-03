@@ -13,6 +13,7 @@ import {
 } from "@/game/profile";
 import type { SaveData } from "@/game/save";
 import { LOOT_STICKERS } from "@/game/save";
+import { EvolutionTrack } from "@/components/Evolution";
 
 export function portrait(career: Career) {
   return career.look === "f" ? "/avatar/idle-f.png" : "/avatar/idle.png";
@@ -153,6 +154,7 @@ export function ProfileScreen({
           </div>
           <p className="rank-note">Rank rises after 2 rounds, then every 3, 4, and 3. Matching a high score counts double.</p>
         </div>
+        <EvolutionTrack career={career} evolution={save.evolution} />
         <h3>Achievements</h3>
         <div className="achieve-grid">
           {ACHIEVEMENTS.map((item) => {
