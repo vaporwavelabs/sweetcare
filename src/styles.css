@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "./level-creator.css";
+@import "./mechanics.css";
 
 @theme {
   --color-pink: #fb3ba6;

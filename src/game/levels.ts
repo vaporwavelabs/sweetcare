@@ -1,6 +1,7 @@
 import type { EmergencyKind } from "./emergency.ts";
 import { type Kind, emptyCollected, type Mask, type Pos } from "./engine.ts";
 import { hasHoles, maskOf, parseGrid, type CellSpec } from "./layout.ts";
+import { contagionFrom, type FeverRule } from "./mechanics.ts";
 
 export type JellyPattern = "none" | "bottom" | "checker" | "frame" | "all" | "lower";
 
@@ -8,7 +9,11 @@ export type Goal =
   | { type: "score"; target: number }
   | { type: "collect"; kind: Kind; count: number }
   | { type: "jelly" }
-  | { type: "wraps" };
+  | { type: "wraps" }
+  /** Clean every infected cell. Contagion spreads, so this one can get away from you. */
+  | { type: "contagion" }
+  /** Treat this many fever tiles before their countdowns run out. */
+  | { type: "fevers"; count: number };
 
 export interface LevelDef {
   id: number;
@@ -42,6 +47,10 @@ export interface LevelDef {
   scene?: number;
   /** Built in the level creator. A custom run never touches the campaign save. */
   custom?: boolean;
+  /** New fevers break out on random tiles. See mechanics.ts. */
+  fever?: FeverRule | null;
+  /** Set when the evolve engine shaped this ward. See evolve.ts. */
+  evolved?: { generations: number; target: number; note?: string | null };
 }
 
 const HOSPITAL: Kind[] = ["heart", "cross", "pill", "bandage", "nurse", "kit"];
@@ -251,6 +260,10 @@ function patternJelly(level: LevelDef): boolean[][] {
   return grid;
 }
 
+export function makeContagion(level: LevelDef): boolean[][] {
+  return contagionFrom(levelCells(level), level.rows, level.cols);
+}
+
 export function countJelly(jelly: boolean[][]): number {
   let n = 0;
   for (const row of jelly) for (const cell of row) if (cell) n += 1;
@@ -262,6 +275,8 @@ export interface Progress {
   collected: Record<Kind, number>;
   jellyLeft: number;
   wrapsLeft?: number;
+  contagionLeft?: number;
+  feversTreated?: number;
 }
 
 export function goalsMet(level: LevelDef, progress: Progress): boolean {
@@ -269,6 +284,8 @@ export function goalsMet(level: LevelDef, progress: Progress): boolean {
     if (goal.type === "score") return progress.score >= goal.target;
     if (goal.type === "collect") return progress.collected[goal.kind] >= goal.count;
     if (goal.type === "wraps") return (progress.wrapsLeft ?? 0) === 0;
+    if (goal.type === "contagion") return (progress.contagionLeft ?? 0) === 0;
+    if (goal.type === "fevers") return (progress.feversTreated ?? 0) >= goal.count;
     return progress.jellyLeft === 0;
   });
 }
@@ -280,12 +297,14 @@ export function starsFor(level: LevelDef, score: number, won: boolean): number {
   return 1;
 }
 
-export function goalFraction(level: LevelDef, progress: Progress, jellyTotal: number, wrapsTotal = 0): number {
+export function goalFraction(level: LevelDef, progress: Progress, jellyTotal: number, wrapsTotal = 0, contagionTotal = 0): number {
   if (!level.goals.length) return 0;
   const parts = level.goals.map((goal) => {
     if (goal.type === "score") return Math.min(1, progress.score / goal.target);
     if (goal.type === "collect") return Math.min(1, progress.collected[goal.kind] / goal.count);
     if (goal.type === "wraps") return wrapsTotal ? Math.min(1, (wrapsTotal - (progress.wrapsLeft ?? 0)) / wrapsTotal) : 1;
+    if (goal.type === "contagion") return contagionTotal ? Math.max(0, 1 - (progress.contagionLeft ?? 0) / contagionTotal) : 1;
+    if (goal.type === "fevers") return Math.min(1, (progress.feversTreated ?? 0) / goal.count);
     if (!jellyTotal) return 1;
     return Math.min(1, (jellyTotal - progress.jellyLeft) / jellyTotal);
   });
@@ -298,6 +317,8 @@ export interface GoalChip {
   kind: Kind | null;
   jelly: boolean;
   wrap?: boolean;
+  /** Icon for a mechanic goal that has no supply sprite. */
+  mark?: "contagion" | "fever";
   done: boolean;
 }
 
@@ -332,6 +353,14 @@ export function goalChips(level: LevelDef, progress: Progress, jellyTotal: numbe
         wrap: true,
         done: left === 0,
       };
+    }
+    if (goal.type === "contagion") {
+      const left = progress.contagionLeft ?? 0;
+      return { key: `contagion-${index}`, label: left ? `${left} left` : "Clean", kind: null, jelly: false, mark: "contagion", done: left === 0 };
+    }
+    if (goal.type === "fevers") {
+      const have = progress.feversTreated ?? 0;
+      return { key: `fevers-${index}`, label: `${Math.min(have, goal.count)}/${goal.count}`, kind: null, jelly: false, mark: "fever", done: have >= goal.count };
     }
     const cleared = jellyTotal - progress.jellyLeft;
     return {

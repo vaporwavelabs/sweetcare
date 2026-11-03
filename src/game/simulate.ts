@@ -21,7 +21,8 @@ import {
   type Rng,
 } from "./engine.ts";
 import { applyLayout } from "./layout.ts";
-import { breakJelly, countJelly, freshCollected, goalsMet, levelCells, levelMask, makeJelly, type LevelDef } from "./levels.ts";
+import { breakJelly, countJelly, freshCollected, goalsMet, levelCells, levelMask, makeContagion, makeJelly, type LevelDef } from "./levels.ts";
+import { CONTAGION_POINTS, FEVER_POINTS, afterMove, cleanContagion, countLayer, treatFevers } from "./mechanics.ts";
 
 /**
  * A headless player for level design. It plays a level the way the game does (same cascades,
@@ -38,6 +39,8 @@ export interface RunResult {
   used: number;
   /** Score when the goals were met, before the move bonus. */
   goalScore: number;
+  /** The run ended early because a fever ran out. */
+  burned?: boolean;
 }
 
 export interface Report {
@@ -79,18 +82,24 @@ interface SimState {
   collected: Record<Kind, number>;
   assist: boolean;
   form: number;
+  contagion: boolean[][];
+  cleanedThisMove: number;
+  movesMade: number;
+  feversTreated: number;
 }
 
 function needs(state: SimState) {
   const kinds = new Set<Kind>();
   let jelly = false;
   let wraps = false;
+  let fevers = false;
   for (const goal of state.level.goals) {
     if (goal.type === "collect" && state.collected[goal.kind] < goal.count) kinds.add(goal.kind);
     if (goal.type === "jelly") jelly = true;
     if (goal.type === "wraps") wraps = true;
+    if (goal.type === "fevers" && state.feversTreated < goal.count) fevers = true;
   }
-  return { kinds, jelly, wraps };
+  return { kinds, jelly, wraps, fevers };
 }
 
 function value(state: SimState, plan: ClearPlan): number {
@@ -100,6 +109,10 @@ function value(state: SimState, plan: ClearPlan): number {
     const tile = state.board[pos.r]?.[pos.c];
     if (tile && want.kinds.has(tile.kind)) v += 4;
     if (want.jelly && state.jelly[pos.r]?.[pos.c]) v += 5;
+    // Contagion always matters: it spreads whenever a move cleans none of it.
+    if (state.contagion[pos.r]?.[pos.c]) v += 6;
+    // A fever is worth more the closer it is to running out.
+    if (tile?.fuse) v += (want.fevers ? 8 : 4) + Math.max(0, 8 - tile.fuse) * 3;
   }
   if (want.wraps) v += plan.peels.length * 5;
   // Clearing low on the board stirs more cascades.
@@ -138,7 +151,11 @@ function pickSwap(state: SimState): [Pos, Pos] | null {
 
 function play(state: SimState, plan: ClearPlan, mask: ReturnType<typeof levelMask>) {
   const broken = breakJelly(state.jelly, plan.removals);
-  state.score += plan.score + broken * 40;
+  const cleaned = cleanContagion(state.contagion, plan.removals);
+  const treated = treatFevers(state.board, plan);
+  state.cleanedThisMove += cleaned;
+  state.feversTreated += treated;
+  state.score += plan.score + broken * 40 + cleaned * CONTAGION_POINTS + treated * FEVER_POINTS;
   for (const kind of KINDS) state.collected[kind] += plan.collected[kind];
   const painted = paintSpecials(state.board, plan);
   eraseIds(state.board, painted.dyingIds);
@@ -153,6 +170,8 @@ function progressOf(state: SimState) {
     collected: state.collected,
     jellyLeft: countJelly(state.jelly),
     wrapsLeft: countWraps(state.board),
+    contagionLeft: countLayer(state.contagion),
+    feversTreated: state.feversTreated,
   };
 }
 
@@ -176,7 +195,12 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
     collected: freshCollected(),
     assist: false,
     form: 0,
+    contagion: makeContagion(level),
+    cleanedThisMove: 0,
+    movesMade: 0,
+    feversTreated: 0,
   };
+  let burned = false;
   let shuffles = 0;
   let guard = 0;
   while (state.moves > 0 && guard++ < 500) {
@@ -212,11 +236,18 @@ export function simulateOnce(level: LevelDef, seed: number): RunResult {
       plan = planFromMatches(state.board, combo);
     }
     trackAssist(state, level.id, combo > 2);
+    state.movesMade += 1;
+    // The game checks the goals before the ward gets its turn, so a winning move stands.
+    if (goalsMet(level, progressOf(state))) break;
+    if (afterMove(state, mask, state.rng, level.fever).burst.length) {
+      burned = true;
+      break;
+    }
   }
-  const won = goalsMet(level, progressOf(state));
+  const won = !burned && goalsMet(level, progressOf(state));
   const goalScore = state.score;
   if (won) state.score += state.moves * 100;
-  return { won, score: state.score, movesLeft: won ? state.moves : 0, used: level.moves - state.moves, goalScore };
+  return { won, score: state.score, movesLeft: won ? state.moves : 0, used: burned ? level.moves : level.moves - state.moves, goalScore, ...(burned ? { burned } : {}) };
 }
 
 function quantile(sorted: number[], q: number): number {

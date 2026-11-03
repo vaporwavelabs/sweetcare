@@ -9,7 +9,7 @@ const GRID = ["# . . . . #", ". jw . . W .", ". . jb . . .", ". . . . . .", ". .
 test("a layout reads and writes back the same", () => {
   const cells = parseGrid(GRID, 6, 6);
   assert.equal(cells[0]![0]!.hole, true);
-  assert.deepEqual(cells[1]![1], { hole: false, jelly: true, wrap: 1, special: null });
+  assert.deepEqual(cells[1]![1], { hole: false, jelly: true, wrap: 1, special: null, contagion: false, fuse: 0 });
   assert.equal(cells[1]![4]!.wrap, 2);
   assert.equal(cells[2]![2]!.special, "bomb");
   assert.deepEqual(formatGrid(cells), GRID);
@@ -17,7 +17,7 @@ test("a layout reads and writes back the same", () => {
 
 test("short or missing rows fill with plain cells and a hole never carries layers", () => {
   const cells = parseGrid(["#jw"], 3, 3);
-  assert.deepEqual(cells[0]![0], { hole: true, jelly: false, wrap: 0, special: null });
+  assert.deepEqual(cells[0]![0], { hole: true, jelly: false, wrap: 0, special: null, contagion: false, fuse: 0 });
   assert.equal(cells[2]![2]!.hole, false);
   assert.equal(resizeGrid(cells, 4, 2).length, 4);
   assert.equal(mirrorGrid(parseGrid(["# . ."], 1, 3))[0]![2]!.hole, true);

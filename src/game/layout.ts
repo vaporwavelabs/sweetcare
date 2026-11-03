@@ -9,36 +9,56 @@ import type { Board, Mask, Power } from "./engine.ts";
  *   .  plain cell        #  hole (no tile, tiles fall through)
  *   j  jelly under it    w  one bandage wrap    W  two bandage wraps
  *   r  row stripe        c  column stripe       b  bomb    *  rainbow
+ *   x  contagion (spreads to a neighbour after any move that cleans none of it)
+ *   t  fever tile, optionally followed by its countdown, as in "t6" (default 8)
  *
- * Flags combine, so "jw" is a wrapped tile on jelly and "jb" is a bomb on jelly.
+ * Flags combine, so "jw" is a wrapped tile on jelly and "xt5" is a fever tile on contagion.
+ * A fever never sits under a wrap, because a wrapped tile cannot be cleared in time.
  */
 export interface CellSpec {
   hole: boolean;
   jelly: boolean;
   wrap: 0 | 1 | 2;
   special: Power | null;
+  contagion: boolean;
+  /** Fever countdown on the starting tile. 0 means none. */
+  fuse: number;
 }
 
 export const MIN_SIDE = 4;
 export const MAX_SIDE = 9;
+export const DEFAULT_FUSE = 8;
+export const MIN_FUSE = 3;
+export const MAX_FUSE = 20;
 
 const SPECIAL_OF: Record<string, Power> = { r: "row", c: "col", b: "bomb", "*": "rainbow" };
 const CHAR_OF: Record<Power, string> = { row: "r", col: "c", bomb: "b", rainbow: "*" };
 
 export function plainCell(): CellSpec {
-  return { hole: false, jelly: false, wrap: 0, special: null };
+  return { hole: false, jelly: false, wrap: 0, special: null, contagion: false, fuse: 0 };
+}
+
+export function holeCell(): CellSpec {
+  return { ...plainCell(), hole: true };
 }
 
 export function parseToken(token: string): CellSpec {
   const cell = plainCell();
-  for (const ch of token) {
+  for (let i = 0; i < token.length; i++) {
+    const ch = token[i]!;
     if (ch === "#") cell.hole = true;
     else if (ch === "j") cell.jelly = true;
+    else if (ch === "x") cell.contagion = true;
     else if (ch === "w") cell.wrap = Math.max(cell.wrap, 1) as 1 | 2;
     else if (ch === "W") cell.wrap = 2;
-    else if (SPECIAL_OF[ch]) cell.special = SPECIAL_OF[ch]!;
+    else if (ch === "t") {
+      let digits = "";
+      while (i + 1 < token.length && /\d/.test(token[i + 1]!)) digits += token[++i];
+      cell.fuse = clampFuse(digits ? Number(digits) : DEFAULT_FUSE);
+    } else if (SPECIAL_OF[ch]) cell.special = SPECIAL_OF[ch]!;
   }
-  if (cell.hole) return { hole: true, jelly: false, wrap: 0, special: null };
+  if (cell.hole) return holeCell();
+  if (cell.wrap) cell.fuse = 0;
   return cell;
 }
 
@@ -46,10 +66,16 @@ export function formatToken(cell: CellSpec): string {
   if (cell.hole) return "#";
   let out = "";
   if (cell.jelly) out += "j";
+  if (cell.contagion) out += "x";
   if (cell.wrap === 1) out += "w";
   if (cell.wrap === 2) out += "W";
   if (cell.special) out += CHAR_OF[cell.special];
+  if (cell.fuse) out += `t${cell.fuse}`;
   return out || ".";
+}
+
+export function clampFuse(n: number): number {
+  return Math.max(MIN_FUSE, Math.min(MAX_FUSE, Math.round(Number.isFinite(n) ? n : DEFAULT_FUSE)));
 }
 
 /** Reads a layout. Missing rows or cells become plain cells, extra ones are dropped. */
@@ -91,6 +117,7 @@ export function applyLayout(board: Board, cells: CellSpec[][]) {
       if (!tile || !cell) continue;
       if (cell.wrap) tile.wrap = cell.wrap;
       if (cell.special) tile.special = cell.special;
+      if (cell.fuse && !cell.wrap) tile.fuse = cell.fuse;
     }
   }
 }

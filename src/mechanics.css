@@ -1,0 +1,226 @@
+/* Ward mechanics in play and in the creator (contagion, fevers) and the creator's evolve panel. */
+
+.contagion-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.contagion-cell {
+  position: absolute;
+  left: 0;
+  top: 0;
+}
+
+.contagion-cell::before {
+  content: "";
+  position: absolute;
+  inset: 5%;
+  border-radius: 34%;
+  /* A film over the tile: speckled spores, a green wash, and a fuzzy rim. */
+  background:
+    radial-gradient(circle at 22% 26%, rgba(226, 255, 140, 0.95) 0 7%, transparent 8%),
+    radial-gradient(circle at 74% 70%, rgba(226, 255, 140, 0.9) 0 6%, transparent 7%),
+    radial-gradient(circle at 70% 20%, rgba(200, 245, 100, 0.9) 0 5%, transparent 6%),
+    radial-gradient(circle at 26% 78%, rgba(200, 245, 100, 0.85) 0 4%, transparent 5%),
+    radial-gradient(circle at 50% 50%, rgba(140, 214, 60, 0.18) 30%, rgba(96, 170, 36, 0.5) 72%);
+  box-shadow: inset 0 0 0 3px rgba(96, 170, 36, 0.85), inset 0 0 12px rgba(120, 200, 50, 0.7), 0 0 8px rgba(150, 230, 60, 0.55);
+  animation: contagion-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes contagion-pulse {
+  50% { transform: scale(0.93); filter: saturate(1.3); }
+}
+
+.tile.fever .candy {
+  filter: drop-shadow(0 0 6px rgba(255, 90, 40, 0.85)) saturate(1.2);
+}
+
+.fever-badge {
+  position: absolute;
+  right: -2%;
+  top: -4%;
+  min-width: 1.35em;
+  height: 1.35em;
+  padding: 0 0.2em;
+  box-sizing: border-box;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 900;
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #fff;
+  background: radial-gradient(circle at 35% 30%, #ffb27a, #ff5a28 60%, #d8261a);
+  box-shadow: 0 1px 0 rgba(120, 0, 0, 0.6), 0 0 0 2px #fff;
+  pointer-events: none;
+}
+
+.tile.fever-hot .fever-badge {
+  animation: fever-throb 0.7s ease-in-out infinite;
+}
+
+@keyframes fever-throb {
+  50% { transform: scale(1.18); }
+}
+
+.goal-chips .chip-contagion,
+.tool-contagion i {
+  background: radial-gradient(circle at 30% 30%, #e6ff9a 0 18%, transparent 20%), radial-gradient(circle at 50% 50%, #8fd14a, #4a8c1e);
+}
+
+.goal-chips .chip-fever,
+.tool-fever i {
+  background: radial-gradient(circle at 35% 30%, #ffb27a, #ff5a28 60%, #d8261a);
+}
+
+/* Creator cells */
+
+.lc-cell.contagion::before {
+  content: "";
+  position: absolute;
+  inset: 4%;
+  border-radius: 28%;
+  background: radial-gradient(circle at 30% 30%, rgba(230, 255, 154, 0.8) 0 12%, transparent 14%), radial-gradient(circle at 50% 50%, rgba(143, 209, 74, 0.7), rgba(74, 140, 30, 0.75));
+  pointer-events: none;
+}
+
+.lc-cell .fever-badge {
+  right: 2%;
+  top: 2%;
+  font-size: 0.7rem;
+  z-index: 2;
+}
+
+/* Evolve panel */
+
+.lc-mechs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.4rem 0;
+}
+
+.lc-mechs button {
+  border: 2px solid #ffc2df;
+  border-radius: 999px;
+  background: #fff;
+  color: var(--color-ink);
+  font-weight: 800;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.65rem;
+}
+
+.lc-mechs button.on {
+  border-color: var(--color-pink-deep);
+  background: #ffe3f1;
+  color: var(--color-pink-deep);
+}
+
+.lc-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 800;
+  font-size: 0.8rem;
+  margin-right: 0.8rem;
+}
+
+.lc-check input {
+  width: 1.1rem;
+  height: 1.1rem;
+  accent-color: var(--color-pink-deep);
+}
+
+.lc-progress {
+  height: 0.5rem;
+  border-radius: 999px;
+  background: #ffe3f1;
+  overflow: hidden;
+  margin-top: 0.5rem;
+}
+
+.lc-progress i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #ff7ab8, var(--color-pink-deep));
+  transition: width 0.2s ease;
+}
+
+.lc-evolved {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.lc-pick {
+  display: grid;
+  grid-template-columns: 5.5rem 1fr;
+  gap: 0.6rem;
+  align-items: start;
+  background: #fff;
+  border-radius: 0.9rem;
+  padding: 0.5rem;
+}
+
+.lc-pick.best {
+  box-shadow: inset 0 0 0 2px var(--color-pink-deep);
+}
+
+.lc-mini {
+  display: grid;
+  gap: 1px;
+  padding: 3px;
+  border-radius: 0.5rem;
+  background: linear-gradient(160deg, #7a6cf0, #5b86f2);
+}
+
+.lc-mini i {
+  position: relative;
+  aspect-ratio: 1;
+  border-radius: 25%;
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.lc-mini i.hole { background: rgba(40, 6, 30, 0.6); }
+.lc-mini i.jelly { background: #8ff0c4; }
+.lc-mini i.contagion { background: #8fd14a; }
+.lc-mini i.wrap { background: repeating-linear-gradient(-38deg, #fffaf0 0 2px, #e9d2b7 2px 3px); }
+.lc-mini i.fever { background: #ff5a28; }
+.lc-mini i.power { background: #ffd34d; }
+
+.lc-pick h4 {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-pink-deep);
+}
+
+.lc-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+  margin: 0.2rem 0;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.lc-changes {
+  margin: 0.2rem 0 0.35rem;
+  padding-left: 1rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.lc-pick .lc-actions {
+  margin-top: 0.2rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .contagion-cell::before,
+  .tile.fever-hot .fever-badge {
+    animation: none;
+  }
+}

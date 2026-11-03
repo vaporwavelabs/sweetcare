@@ -9,6 +9,8 @@ export interface Tile {
   special: Special;
   /** Bandage wrap layers. A wrapped tile cannot be swapped and a match peels one layer instead of clearing it. */
   wrap?: number;
+  /** Fever countdown. Ticks down after every move; clear the tile before it reaches 0. See mechanics.ts. */
+  fuse?: number;
 }
 
 /** true marks a playable cell. Holes stay empty and tiles fall through them. */
