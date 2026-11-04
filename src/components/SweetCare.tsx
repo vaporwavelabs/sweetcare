@@ -98,6 +98,8 @@ import { Cutscene } from "@/components/Cutscene";
 import { LevelComplete, StageBar } from "@/components/LevelEnd";
 import { PerkFx, type PerkFlash } from "@/components/PerkFx";
 import { GIFT_CARDS, cardForLevel, rememberGift } from "@/game/cards";
+import { CERTIFICATES, earnCert, hasGift, missingCert, type CertId } from "@/game/certificates";
+import { CertificateCenter } from "@/components/CertificateCenter";
 import { haptic, setHapticStrength, setHapticsPref } from "@/game/haptics";
 import { bossTierFor, createBoss, hitBoss, MOVE_LABEL, shoveBoss as shoveKaren, stepBoss, windupProgress, type BossEvent, type BossState } from "@/game/boss";
 import { makeGerm, stepGerm, woundGerm, type Germ } from "@/game/swarm";
@@ -404,6 +406,7 @@ export function SweetCare() {
   const [cell, setCell] = useState(36);
   const [frame, setFrame] = useState({ x: 0, y: 0, w: 1, h: 1 });
   const [journeyId, setJourneyId] = useState(1);
+  const [certPrompt, setCertPrompt] = useState<CertId | null>(null);
   const [creatorUid, setCreatorUid] = useState<string | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
   const [logOpen, setLogOpen] = useState(false);
@@ -559,6 +562,8 @@ export function SweetCare() {
           prefs: next.prefs,
           wallet: next.wallet,
           evolution: next.evolution,
+          certs: next.certs ?? disk.certs,
+          cardsSpent: next.cardsSpent ?? disk.cardsSpent,
         };
         diskRef.current = stored;
         writeSave(stored);
@@ -650,7 +655,13 @@ export function SweetCare() {
     }
   }
 
+  /** Hand in cards at the Certificate Center. Saved straight away. */
+  function earnCertificate(id: CertId) {
+    patchSave((prev) => earnCert(prev, id), "checkpoint");
+  }
+
   function collectGift(levelId: number) {
+    if (!hasGift(levelId)) return;
     const card = cardForLevel(levelId);
     patchSave((prev) => ({
       ...prev,
@@ -671,6 +682,7 @@ export function SweetCare() {
       loot: true,
       stars: { ...prev.stars, "5": Math.max(prev.stars["5"] ?? 0, 1) },
       gifts: GIFT_CARDS.map((card) => card.id),
+      certs: CERTIFICATES.map((cert) => cert.id),
       career: {
         ...prev.career,
         rank: Math.max(prev.career.rank, 9),
@@ -894,6 +906,13 @@ export function SweetCare() {
   }
 
   function openLevel(id: number) {
+    // Behind a certificate fence: go to the island and open the Certificate Center instead.
+    const fenced = missingCert(saveRef.current, id);
+    if (fenced) {
+      setCertPrompt(fenced.id);
+      setScreen("map");
+      return;
+    }
     if (journeyFor(id)) {
       setJourneyId(id);
       setScreen("journey");
@@ -1974,9 +1993,12 @@ export function SweetCare() {
           onClassic={() => pickMapView("classic")}
           renderReveal={(id, close) => <CardReveal levelId={id} onClose={close} />}
           onStep={(index) => playSfx("map.step", { index })}
+          onEarnCert={earnCertificate}
+          certPrompt={certPrompt}
+          onPromptSeen={() => setCertPrompt(null)}
         />
       ) : null}
-      {screen === "map" && mapView === "classic" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} onRoam={() => pickMapView("roam")} /> : null}
+      {screen === "map" && mapView === "classic" ? <MapScreen save={save} onBack={() => setScreen("home")} onPick={(id) => openLevel(id)} onCollect={collectGift} onRoam={() => pickMapView("roam")} onEarnCert={earnCertificate} certPrompt={certPrompt} onPromptSeen={() => setCertPrompt(null)} /> : null}
       {screen === "help" ? <Help onBack={() => setScreen("settings")} /> : null}
       {screen === "settings" ? (
         <OptionsScreen
@@ -2204,7 +2226,12 @@ function DevMenu({
   );
 }
 
-function MapScreen({ save, onBack, onPick, onCollect, onRoam }: { save: SaveData; onBack: () => void; onPick: (id: number) => void; onCollect: (levelId: number) => void; onRoam?: () => void }) {
+function MapScreen({ save, onBack, onPick, onCollect, onRoam, onEarnCert, certPrompt, onPromptSeen }: { save: SaveData; onBack: () => void; onPick: (id: number) => void; onCollect: (levelId: number) => void; onRoam?: () => void; onEarnCert: (id: CertId) => void; certPrompt?: CertId | null; onPromptSeen?: () => void }) {
+  const [center, setCenter] = useState<{ highlight: CertId | null } | null>(() => (certPrompt ? { highlight: certPrompt } : null));
+  useEffect(() => {
+    if (certPrompt) onPromptSeen?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const nextId = continueLevel(save);
   const preview = attemptFor(save, nextId);
   const rolled = nextId >= 3 && nextId <= 15 && !getLevel(nextId).bossHp;
@@ -2229,7 +2256,7 @@ function MapScreen({ save, onBack, onPick, onCollect, onRoam }: { save: SaveData
   const pendingGifts = MAP_SPOTS.filter((pin) => {
     const stars = save.stars[String(pin.id)] ?? 0;
     const finished = stars >= 1 || pin.id < save.unlocked;
-    return finished && !opened.includes(pin.id);
+    return finished && hasGift(pin.id) && !missingCert(save, pin.id) && !opened.includes(pin.id);
   });
   return (
     <div className="column map">
@@ -2244,6 +2271,7 @@ function MapScreen({ save, onBack, onPick, onCollect, onRoam }: { save: SaveData
           {zoomed ? "Whole island" : "Zoom to next"}
         </button>
         {onRoam ? <button className="zoom-toggle" type="button" onClick={onRoam}>Walk the island</button> : null}
+        <button className="zoom-toggle" type="button" onClick={() => { sfxClick(); setCenter({ highlight: null }); }}>Certificates</button>
       </div>
       <div className={zoomed ? "island-wrap zoomed" : "island-wrap"}>
         <IslandCamera focusX={spot.x} focusY={spot.y} zoom={zoomed}>
@@ -2251,7 +2279,7 @@ function MapScreen({ save, onBack, onPick, onCollect, onRoam }: { save: SaveData
           {MAP_SPOTS.map((pin) => {
             const bonus = pin.id >= 26;
             const side = pin.id >= 16 && !bonus;
-            const locked = bonus ? false : !side && pin.id > save.unlocked;
+            const locked = Boolean(missingCert(save, pin.id)) || (bonus ? false : !side && pin.id > save.unlocked);
             const stars = save.stars[String(pin.id)] ?? 0;
             const mark = pin.id === 16 ? "N" : pin.id === 17 ? "L" : pin.id === 18 ? "O" : String(pin.id);
             const kind = levelKind(getLevel(pin.id));
@@ -2264,7 +2292,7 @@ function MapScreen({ save, onBack, onPick, onCollect, onRoam }: { save: SaveData
           })}
           {MAP_SPOTS.map((pin) => {
             const stars = save.stars[String(pin.id)] ?? 0;
-            if (stars < 1 || opened.includes(pin.id)) return null;
+            if (stars < 1 || opened.includes(pin.id) || !hasGift(pin.id) || missingCert(save, pin.id)) return null;
             return (
               <button key={`gift-${pin.id}`} type="button" className="pin-gift" style={{ left: `${pin.x}%`, top: `${pin.y}%` }} aria-label={`Open secret gift for level ${pin.id}`} onClick={() => {
                 unlockAudio();
@@ -2296,6 +2324,7 @@ function MapScreen({ save, onBack, onPick, onCollect, onRoam }: { save: SaveData
         </div>
       ) : null}
       {opening != null ? <CardReveal levelId={opening} onClose={() => setOpening(null)} /> : null}
+      {center ? <CertificateCenter save={save} highlight={center.highlight} onEarn={onEarnCert} onClose={() => setCenter(null)} /> : null}
       {previewId != null ? (
         <LevelSheet
           levelId={previewId}
@@ -2987,6 +3016,7 @@ function CardReveal({ levelId, onClose }: { levelId: number; onClose: () => void
     <div className="card-reveal" role="dialog" aria-label={`${card.name} unlocked`}>
       <Fireworks />
       {card.model ? <SketchModel card={card} /> : <img src={card.src} alt={card.name} />}
+      <p className="card-reveal-note">Card added. Hand cards in at the Certificate Center to open new paths.</p>
       <button className="btn" type="button" onClick={onClose}>Keep</button>
     </div>
   );
@@ -3066,7 +3096,7 @@ function Outro({
   onCollect: (levelId: number) => void;
 }) {
   const won = model.outcome === "win";
-  const pending = won && !model.level.custom && !(save.openedGifts ?? []).includes(model.level.id);
+  const pending = won && !model.level.custom && hasGift(model.level.id) && !(save.openedGifts ?? []).includes(model.level.id);
   const [giftPhase, setGiftPhase] = useState<"box" | "open" | "kept">(pending ? "box" : "kept");
   const openGift = () => {
     unlockAudio();
