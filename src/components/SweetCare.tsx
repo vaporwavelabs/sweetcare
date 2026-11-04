@@ -1,6 +1,6 @@
 import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import { ChevronLeft, Coins, Pause, Star, Volume2, VolumeX } from "lucide-react";
+import { ChevronLeft, Coins, Lock, Pause, Star, Volume2, VolumeX } from "lucide-react";
 import { Cheer, CountUp, DocAvatar, portrait, ProfileScreen, SketchModel } from "@/components/Profile";
 import { applyRound, ACHIEVEMENTS, rankTitle } from "@/game/profile";
 import { applyCare, challengeFor, challengeMet, stageRewards, wardPerks, type Challenge, type EvolveResult } from "@/game/evolution";
@@ -97,6 +97,8 @@ import { hasSeen, markSeen, resetSeen, sceneAfter, sceneBefore, SCENE_IDS, SCENE
 import { Cutscene } from "@/components/Cutscene";
 import { LevelComplete, StageBar } from "@/components/LevelEnd";
 import { PerkFx, type PerkFlash } from "@/components/PerkFx";
+import { PowerCallout, PowerFx, type PowerFlash } from "@/components/PowerFx";
+import { firstPowerWard, POWER_UNLOCK_WARD, POWERS, powersUnlocked, shout } from "@/game/powers";
 import { GIFT_CARDS, cardForLevel, rememberGift } from "@/game/cards";
 import { CERTIFICATES, earnCert, hasGift, missingCert, type CertId } from "@/game/certificates";
 import { CertificateCenter } from "@/components/CertificateCenter";
@@ -245,6 +247,8 @@ interface Model {
   perks: PerkState;
   /** The perk effect on screen, if one just fired. */
   perkFx: PerkFlash | null;
+  /** The power up that just landed: drives the shout above the board and its board effect. */
+  powerFx: PowerFlash | null;
 }
 
 /** Background music for a screen, and for a ward by its type. */
@@ -867,6 +871,7 @@ export function SweetCare() {
       feversTreated: 0,
       perks: createPerks(),
       perkFx: null,
+      powerFx: null,
       challenge,
       boostersUsed: 0,
       secondWind: perks.secondWind,
@@ -898,6 +903,15 @@ export function SweetCare() {
         bump();
       }
     }, 1500);
+    if (!level.custom && level.id > POWER_UNLOCK_WARD && powersUnlocked(saveRef.current.unlocked, level)) {
+      window.setTimeout(() => {
+        const current = modelRef.current;
+        if (!current || runRef.current !== run || current.outcome || !firstPowerWard()) return;
+        say(current, "Power ups unlocked! Tap Power up", 2800);
+        playSfx("reward.unlock");
+        bump();
+      }, tip ? 4300 : 1500);
+    }
     } catch (error) {
       note("Start", error);
       setScreen("home");
@@ -1842,7 +1856,13 @@ export function SweetCare() {
       model.phase = "busy";
       model.selected = null;
       clearHint();
-      void runClears(runRef.current, plan, 1);
+      firePower(model, "blast", pos);
+      particleRef.current?.detonate([{ ...pos, special: "row" }, { ...pos, special: "col" }]);
+      const run = runRef.current;
+      // A beat for the beams and the shout to land before the cross clears.
+      void wait(reducedMotion() ? 0 : 260).then(() => {
+        if (runRef.current === run && modelRef.current === model) void runClears(run, plan, 1);
+      });
       return;
     }
     if (model.phase === "aim-stripe") {
@@ -1851,9 +1871,11 @@ export function SweetCare() {
       drawBooster(model, "stripe");
       upgradeSpecial(tile, pos.c);
       model.phase = "idle";
+      model.selected = null;
       model.view = readView(model.board, new Set(), new Set([tile.id]));
-      sfxSpecial();
-      haptic("special");
+      firePower(model, "stripe", pos);
+      particleRef.current?.pop([{ ...pos, kind: tile.kind }], 4);
+      scheduleHint();
       bump();
       return;
     }
@@ -1885,15 +1907,30 @@ export function SweetCare() {
     bump();
   }
 
+  /** The shout above the board, the sound and the board effect for a power up that just landed. */
+  function firePower(model: Model, id: BoosterId, at: Pos | null) {
+    const key = ++seq.current;
+    model.powerFx = { id, key, at };
+    model.shake = id === "blast" && saveRef.current.prefs.shake;
+    playSfx(`power.${id === "stripe" ? "pill" : id}`);
+    shout(POWERS[id].callout);
+    haptic(id === "blast" ? "power" : "special");
+    window.setTimeout(() => {
+      const current = modelRef.current;
+      if (current?.powerFx?.key === key) current.powerFx = null;
+      bump();
+    }, reducedMotion() ? 900 : 1600);
+  }
+
   function useAid() {
     const model = modelRef.current;
     if (!model || model.phase === "busy" || model.outcome || model.boosters.aid <= 0) return;
+    if (!powersUnlocked(saveRef.current.unlocked, model.level)) return;
     unlockAudio();
     drawBooster(model, "aid");
     model.moves += 5;
-    model.banner = "Summoned!";
     model.phase = "idle";
-    haptic("special");
+    firePower(model, "aid", null);
     const mid = { r: Math.floor((model.level.rows - 1) / 2), c: Math.floor((model.level.cols - 1) / 2) };
     summonImps(
       model,
@@ -1903,21 +1940,19 @@ export function SweetCare() {
         { r: mid.r, c: Math.min(model.level.cols - 1, mid.c + 1) },
       ],
       9,
+      true,
     );
     bump();
-    window.setTimeout(() => {
-      const current = modelRef.current;
-      if (current?.banner === "Summoned!") current.banner = null;
-      bump();
-    }, 900);
   }
 
   function arm(which: "blast" | "stripe") {
     const model = modelRef.current;
     if (!model || model.phase === "busy" || model.outcome) return;
     if (model.boosters[which] <= 0) return;
+    if (!powersUnlocked(saveRef.current.unlocked, model.level)) return;
     unlockAudio();
-    sfxClick();
+    playSfx("power.arm");
+    haptic("tap");
     const next: Phase = which === "blast" ? "aim-blast" : "aim-stripe";
     model.phase = model.phase === next ? "idle" : next;
     model.selected = null;
@@ -2070,7 +2105,8 @@ export function SweetCare() {
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             const current = modelRef.current;
-            if (!current || current.phase !== "idle" || current.outcome || current.paused) return;
+            // Aiming a power up also starts on a press: the release taps the candy.
+            if (!current || (current.phase !== "idle" && current.phase !== "aim-blast" && current.phase !== "aim-stripe") || current.outcome || current.paused) return;
             unlockAudio();
             const pos = cellFromEvent(event);
             if (!pos) return;
@@ -2592,6 +2628,17 @@ function Play({
   const scoreRef = useRef<HTMLElement | null>(null);
   const bossRef = useRef<HTMLElement | null>(null);
   const [kitOpen, setKitOpen] = useState(false);
+  const powersOpen = powersUnlocked(save.unlocked, model.level);
+  const aiming = model.phase === "aim-blast" || model.phase === "aim-stripe";
+  const aimInfo = model.phase === "aim-blast" ? POWERS.blast : model.phase === "aim-stripe" ? POWERS.stripe : null;
+  // Lines and shouts sit in a rail just above the board so they never cover a candy.
+  const talking = Boolean(model.banner || model.perkFx || model.powerFx);
+  const rail = (
+    <div className={`talk-rail${arena ? " arena" : ""}${talking ? " live" : ""}`} style={arena ? undefined : { bottom: `calc(${((1 - frame.y) * 100).toFixed(2)}% + 0.7rem)` }} aria-live="polite">
+      {model.powerFx ? <PowerCallout key={model.powerFx.key} fx={model.powerFx} /> : model.perkFx ? <PerkFx fx={model.perkFx} rows={model.level.rows} cols={model.level.cols} part="toast" /> : null}
+      {model.banner && !model.powerFx ? <div className="banner" key={model.banner}>{model.banner}</div> : null}
+    </div>
+  );
   const scene = bossMax ? "/scenes/boss.jpg" : arena ? "/scenes/care.jpg" : `/scenes/${String(sceneFor(model.level)).padStart(2, "0")}.jpg`;
   const cols = model.level.cols;
   const rows = model.level.rows;
@@ -2637,7 +2684,7 @@ function Play({
   const grid = (
     <>
       <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} holes={model.mask} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
-      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}${model.perks.armed ? " bedside" : ""}`} style={{ width: side, height: boardH }}>
+      <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}${model.perks.armed ? " bedside" : ""}${aiming ? ` aiming aim-${model.phase === "aim-blast" ? "blast" : "pill"}` : ""}`} style={{ width: side, height: boardH }}>
         <div className="board" ref={boardRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
           <div className={`pieces${model.animate ? " anim" : ""}`}>
             {model.view.map((tile) => {
@@ -2664,9 +2711,9 @@ function Play({
             <span key={item.id} className="floater" style={{ left: `${((item.c + 0.5) / cols) * 100}%`, top: `${((item.r + 0.5) / rows) * 100}%` }}>{item.text}</span>
           ))}
           {model.flash ? <div className={`fx-flash ${model.flash}`} /> : null}
-          {model.perkFx ? <PerkFx fx={model.perkFx} rows={rows} cols={cols} /> : null}
+          {model.perkFx ? <PerkFx fx={model.perkFx} rows={rows} cols={cols} part="board" /> : null}
+          {model.powerFx ? <PowerFx fx={model.powerFx} rows={rows} cols={cols} /> : null}
           {model.perks.armed && !model.perkFx ? <span className="bedside-chip">Bedside +50%</span> : null}
-          {model.banner ? <div className="banner">{model.banner}</div> : null}
           {model.countdown ? (
             <div className="count-down" aria-live="assertive"><b key={model.countdown} className={/\d/.test(model.countdown) ? "" : "word"}>{model.countdown}</b></div>
           ) : null}
@@ -2789,33 +2836,40 @@ function Play({
             </div>
           </>
         ) : grid}
+        {rail}
       </div>
-      {model.phase === "aim-blast" || model.phase === "aim-stripe" ? (
-        <p className="aim-note">Tap a candy<button type="button" onClick={onCancel}>Cancel</button></p>
+      {aimInfo ? (
+        <p className="aim-note"><img src={aimInfo.sprite} alt="" />{aimInfo.hint}<button type="button" onClick={onCancel}>Cancel</button></p>
       ) : null}
       {arena ? <div className="boss-footer" ref={slotRef} style={{ width: side }}>{grid}</div> : null}
-      <div className="kit-dock">
-        {kitOpen ? (
+      <div className={`kit-dock${powersOpen ? "" : " locked"}`}>
+        {kitOpen && powersOpen ? (
           <div className="kit-pop" role="dialog" aria-label="Power up">
             <div className="kit-row">
-              <button type="button" className={`kit-card${model.phase === "aim-blast" ? " on" : ""}`} disabled={model.boosters.blast <= 0 || model.phase === "busy" || Boolean(model.outcome)} onClick={() => onArm("blast")}>
-                <img src="/sprites/cross.png" alt="" />
-                <span className="kit-pill"><img src="/sprites/heart.png" alt="" />Blast<b>{model.boosters.blast}</b></span>
+              <button type="button" className={`kit-card${model.phase === "aim-blast" ? " on" : ""}`} disabled={model.boosters.blast <= 0 || model.phase === "busy" || Boolean(model.outcome)} onClick={() => { onArm("blast"); setKitOpen(false); }}>
+                <img src={POWERS.blast.sprite} alt="" />
+                <span className="kit-pill">{POWERS.blast.name}<b>{model.boosters.blast}</b></span>
               </button>
-              <button type="button" className={`kit-card${model.phase === "aim-stripe" ? " on" : ""}`} disabled={model.boosters.stripe <= 0 || model.phase === "busy" || Boolean(model.outcome)} onClick={() => onArm("stripe")}>
-                <img src="/sprites/pill.png" alt="" />
-                <span className="kit-pill"><img src="/sprites/heart.png" alt="" />Stripe<b>{model.boosters.stripe}</b></span>
+              <button type="button" className={`kit-card${model.phase === "aim-stripe" ? " on" : ""}`} disabled={model.boosters.stripe <= 0 || model.phase === "busy" || Boolean(model.outcome)} onClick={() => { onArm("stripe"); setKitOpen(false); }}>
+                <img src={POWERS.stripe.sprite} alt="" />
+                <span className="kit-pill">{POWERS.stripe.name}<b>{model.boosters.stripe}</b></span>
               </button>
-              <button type="button" className="kit-card" disabled={model.boosters.aid <= 0 || model.phase === "busy" || Boolean(model.outcome)} onClick={onAid}>
-                <img src="/sprites/nurse.png" alt="" />
-                <span className="kit-pill"><img src="/sprites/bandage.png" alt="" />Aid<b>{model.boosters.aid}</b></span>
+              <button type="button" className="kit-card" disabled={model.boosters.aid <= 0 || model.phase === "busy" || Boolean(model.outcome)} onClick={() => { onAid(); setKitOpen(false); }}>
+                <img src={POWERS.aid.sprite} alt="" />
+                <span className="kit-pill">{POWERS.aid.name}<b>{model.boosters.aid}</b></span>
               </button>
             </div>
           </div>
         ) : null}
-        <button className={`kit-toggle${kitOpen ? " open" : ""}`} type="button" aria-expanded={kitOpen} onClick={() => setKitOpen((open) => !open)}>
-          Power up
-        </button>
+        {powersOpen ? (
+          <button className={`kit-toggle${kitOpen ? " open" : ""}${aiming ? " aiming" : ""}`} type="button" aria-expanded={kitOpen} onClick={() => { if (aiming) onCancel(); setKitOpen((open) => !open); }}>
+            {aiming ? "Cancel power up" : "Power up"}
+          </button>
+        ) : (
+          <button className="kit-toggle" type="button" disabled aria-disabled="true">
+            <Lock className="kit-lock" aria-hidden /> Power ups unlock after Ward {POWER_UNLOCK_WARD}
+          </button>
+        )}
       </div>
       <ParticleLayer boardRef={boardRef} scoreRef={scoreRef} bossRef={bossRef} rows={rows} cols={cols} apiRef={particleRef} />
       {model.paused && !model.outcome ? (

@@ -7,6 +7,7 @@
 @import "./prologue.css";
 @import "./level-end.css";
 @import "./certificates.css";
+@import "./powers.css";
 
 @theme {
   --color-pink: #fb3ba6;
