@@ -118,9 +118,31 @@ export function ParticleLayer({
       flame?: boolean;
       glitter?: boolean;
       scale?: number;
+      shed?: number;
       age: number;
       trail: { x: number; y: number }[];
     }[] = [];
+    const twinkles: { x: number; y: number; vx: number; vy: number; age: number; life: number; size: number; color: string; spin: number }[] = [];
+    let twinkleSeed = 0;
+    const shed = (x: number, y: number, color: string, count: number, scale = 1) => {
+      for (let n = 0; n < count; n++) {
+        twinkleSeed += 1;
+        const j = (twinkleSeed * 0.6180339887) % 1;
+        const a = j * Math.PI * 2;
+        twinkles.push({
+          x: x + Math.cos(a) * 7 * scale,
+          y: y + Math.sin(a) * 7 * scale,
+          vx: Math.cos(a) * (20 + j * 40),
+          vy: Math.sin(a) * (20 + j * 40) - 30,
+          age: 0,
+          life: 0.4 + j * 0.35,
+          size: (5 + ((twinkleSeed * 7) % 5)) * scale,
+          color: twinkleSeed % 3 === 0 ? "#fffef8" : twinkleSeed % 3 === 1 ? "#ffe56a" : color,
+          spin: j * Math.PI,
+        });
+      }
+      if (twinkles.length > 220) twinkles.splice(0, twinkles.length - 220);
+    };
     const drops: { x: number; y: number; vx: number; vy: number; r: number; age: number; pooled: boolean; catch: boolean; tint: "urine" | "lab" | "water" | "glass" | "red" }[] = [];
     const sprites = loadSprites();
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -203,27 +225,39 @@ export function ParticleLayer({
       ctx.restore();
     };
 
-    const drawGlow = (x: number, y: number, color: string, age: number, trail: { x: number; y: number }[]) => {
-      if (trail.length > 1) {
-        ctx.save();
-        ctx.lineCap = "round";
-        ctx.lineJoin = "round";
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 18;
+    // Four-point ✨ sparkle: a long cross with a soft glow and a bright core.
+    const drawTwinkle = (t: { x: number; y: number; age: number; life: number; size: number; color: string; spin: number }) => {
+      const k = t.age / t.life;
+      const grow = k < 0.25 ? k / 0.25 : 1 - (k - 0.25) / 0.75;
+      const twinkle = 0.65 + 0.35 * Math.sin(t.age * 38 + t.spin * 5);
+      const size = t.size * Math.max(0, grow) * twinkle;
+      if (size <= 0.2) return;
+      ctx.save();
+      ctx.translate(t.x, t.y);
+      ctx.rotate(t.spin + t.age * 2.4);
+      ctx.globalAlpha = Math.max(0, Math.min(1, grow * 1.4));
+      ctx.shadowColor = t.color;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = t.color;
+      const star = (r: number) => {
+        const w = r * 0.2;
         ctx.beginPath();
-        ctx.moveTo(trail[0]!.x, trail[0]!.y);
-        for (let i = 1; i < trail.length; i++) ctx.lineTo(trail[i]!.x, trail[i]!.y);
-        ctx.lineTo(x, y);
-        ctx.strokeStyle = color;
-        ctx.globalAlpha = 0.55;
-        ctx.lineWidth = 10;
-        ctx.stroke();
-        ctx.strokeStyle = "#fffef8";
-        ctx.globalAlpha = 0.9;
-        ctx.lineWidth = 3.2;
-        ctx.stroke();
-        ctx.restore();
-      }
+        ctx.moveTo(0, -r);
+        ctx.quadraticCurveTo(w, -w, r, 0);
+        ctx.quadraticCurveTo(w, w, 0, r);
+        ctx.quadraticCurveTo(-w, w, -r, 0);
+        ctx.quadraticCurveTo(-w, -w, 0, -r);
+        ctx.closePath();
+        ctx.fill();
+      };
+      star(size);
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#ffffff";
+      star(size * 0.55);
+      ctx.restore();
+    };
+
+    const drawGlow = (x: number, y: number, color: string, age: number) => {
       const pulse = 22 + Math.sin(age * 22) * 3;
       const halo = ctx.createRadialGradient(x, y, 0, x, y, pulse);
       halo.addColorStop(0, "#ffffff");
@@ -588,6 +622,7 @@ export function ParticleLayer({
         }
         ctx.restore();
       }
+      for (const t of twinkles) drawTwinkle(t);
       for (const spark of seekers) {
         if (spark.star) drawStar(spark.x, spark.y, spark.age * 8);
         else if (spark.glitter) drawGlitter(spark.x, spark.y, spark.color, spark.age, spark.trail, spark.scale ?? 1, spark.homing);
@@ -602,7 +637,7 @@ export function ParticleLayer({
           ctx.arc(spark.x, spark.y, 8 + t * 26, 0, Math.PI * 2);
           ctx.stroke();
           ctx.restore();
-        } else drawGlow(spark.x, spark.y, spark.color, spark.age, spark.trail);
+        } else drawGlow(spark.x, spark.y, spark.color, spark.age);
       }
       for (const drop of drops) {
         const hold = drop.tint === "red" ? 1.35 : 0.85;
@@ -660,8 +695,13 @@ export function ParticleLayer({
         const spark = seekers[i]!;
         spark.age += dt;
         if (spark.homing) {
-          spark.trail.push({ x: spark.x, y: spark.y });
-          if (spark.trail.length > 16) spark.trail.shift();
+          // Orbs shed loose ✨ sparkles that drift and fade instead of drawing a tracer line.
+          spark.shed = (spark.shed ?? 0) + dt * (spark.boss ? 70 : 95);
+          const count = Math.floor(spark.shed);
+          if (count > 0) {
+            spark.shed -= count;
+            shed(spark.x, spark.y, spark.color, count, spark.boss ? 0.85 : 1);
+          }
           const dest = spark.boss ? bossPoint() : goal;
           const dx = dest.x - spark.x;
           const dy = dest.y - spark.y;
@@ -748,6 +788,18 @@ export function ParticleLayer({
         spark.x += spark.vx * dt;
         spark.y += spark.vy * dt;
       }
+      for (let i = twinkles.length - 1; i >= 0; i--) {
+        const t = twinkles[i]!;
+        t.age += dt;
+        if (t.age >= t.life) {
+          twinkles.splice(i, 1);
+          continue;
+        }
+        t.vx *= 0.94;
+        t.vy = t.vy * 0.94 + 60 * dt;
+        t.x += t.vx * dt;
+        t.y += t.vy * dt;
+      }
       const board = boardRef.current;
       const hostRect = host.getBoundingClientRect();
       const boardRect = board?.getBoundingClientRect();
@@ -799,7 +851,7 @@ export function ParticleLayer({
         }
       }
       draw();
-      if (world.bodies.length === 0 && seekers.length === 0 && drops.length === 0 && fx.list.length === 0) {
+      if (world.bodies.length === 0 && seekers.length === 0 && twinkles.length === 0 && drops.length === 0 && fx.list.length === 0) {
         raf = 0;
         return;
       }
