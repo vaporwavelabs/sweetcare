@@ -8,14 +8,21 @@ test("prologue opens on campus and ends on the island map", () => {
   assert.equal(setAt(scene, scene.beats.length - 1), "island");
 });
 
-test("prologue walks through graduation, the NCLEX and the job offer in order", () => {
+test("prologue walks through graduation, the NCLEX, debt, rejections and the job offer in order", () => {
   const scene = SCENES.prologue;
   const order: string[] = [];
   scene.beats.forEach((_, i) => {
     const set = setAt(scene, i);
     if (set && order[order.length - 1] !== set) order.push(set);
   });
-  assert.deepEqual(order, ["campus", "study", "exam", "exam-off", "result", "letter", "ferry", "island"]);
+  assert.deepEqual(order, ["campus", "exam", "exam-off", "result", "debt", "rejects", "letter", "ferry", "island"]);
+});
+
+test("prologue stays short and hits the job-hunt joke", () => {
+  const beats = SCENES.prologue.beats;
+  assert.ok(beats.length <= 14, `prologue has ${beats.length} beats`);
+  const text = beats.map((beat) => beat.line ?? "").join(" ");
+  for (const bit of ["NCLEX", "student loans", "experience", "Clinicals don't count"]) assert.ok(text.includes(bit), bit);
 });
 
 test("prologue clears the stage before the island reveal", () => {
