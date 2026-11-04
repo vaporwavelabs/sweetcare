@@ -521,6 +521,19 @@ export function SweetCare() {
     setCell(board.clientWidth / (modelRef.current?.level.cols ?? COLS));
   }, [screen, side, tick]);
 
+  // Older iOS Safari has no overflow: clip and can still scroll the hidden board box, which shifts every
+  // piece off its cell. Pin any board at the origin whenever something scrolls it (scroll doesn't bubble, so capture).
+  useEffect(() => {
+    const pin = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.classList.contains("board")) return;
+      if (target.scrollTop !== 0) target.scrollTop = 0;
+      if (target.scrollLeft !== 0) target.scrollLeft = 0;
+    };
+    document.addEventListener("scroll", pin, { capture: true, passive: true });
+    return () => document.removeEventListener("scroll", pin, { capture: true });
+  }, []);
+
   function clearHint() {
     if (hintRef.current) window.clearTimeout(hintRef.current);
     hintRef.current = null;
