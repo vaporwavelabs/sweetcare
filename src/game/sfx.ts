@@ -38,6 +38,10 @@ export const SFX_NAMES = [
   "perk.bedside",
   "perk.miracle",
   "perk.bonus",
+  "power.arm",
+  "power.blast",
+  "power.pill",
+  "power.aid",
   "cut.whoosh",
   "cut.blip",
   "cut.stamp",
@@ -201,6 +205,34 @@ const CUES: Record<SfxName, Cue> = {
   },
   "perk.bonus": (d) => {
     [1319, 1568, 2093].forEach((f, i) => tone(f, 0.12, 0.045, { when: d + i * 0.06, type: sq, cutoff: 4000 }));
+  },
+  // Power ups. A charge-up click when one is picked, then a big hit when it lands.
+  "power.arm": (d) => {
+    tone(660, 0.09, 0.04, { when: d, type: tri, slideTo: 990 });
+    tone(1320, 0.12, 0.03, { when: d + 0.07, type: tri });
+  },
+  // Code Blast: a rising siren, a boom, and debris hiss along the cross.
+  "power.blast": (d) => {
+    tone(500, 0.22, 0.04, { when: d, type: saw, slideTo: 1800, cutoff: 3000, attack: 0.03 });
+    tone(120, 0.45, 0.18, { when: d + 0.2, type: sq, slideTo: 38, cutoff: 900 });
+    noise(0.55, 0.14, { when: d + 0.2, filter: "lowpass", freq: 1400, sweepTo: 300 });
+    noise(0.35, 0.05, { when: d + 0.24, filter: "highpass", freq: 4000 });
+    [1047, 1568].forEach((f, i) => tone(f, 0.18, 0.03, { when: d + 0.5 + i * 0.07, type: tri }));
+  },
+  // Power Pill: a bottle shake, a fizzy gulp up the scale, and a sparkle.
+  "power.pill": (d) => {
+    for (let i = 0; i < 3; i++) noise(0.05, 0.05, { when: d + i * 0.06, filter: "bandpass", freq: 3200, q: 3 });
+    tone(330, 0.3, 0.06, { when: d + 0.2, type: sq, slideTo: 1320, cutoff: 2600 });
+    [1319, 1760, 2093, 2637].forEach((f, i) => tone(f, 0.14, 0.035, { when: d + 0.42 + i * 0.05, type: tri }));
+    noise(0.35, 0.025, { when: d + 0.42, filter: "bandpass", freq: 6000, q: 1.5, sweepTo: 10000 });
+  },
+  // First Aid: a calm monitor beep that picks up into a happy heartbeat.
+  "power.aid": (d) => {
+    tone(988, 0.08, 0.04, { when: d, attack: 0.004 });
+    tone(988, 0.08, 0.04, { when: d + 0.2, attack: 0.004 });
+    tone(80, 0.12, 0.13, { when: d + 0.38, slideTo: 50 });
+    tone(80, 0.12, 0.1, { when: d + 0.54, slideTo: 50 });
+    [784, 988, 1175, 1568].forEach((f, i) => tone(f, 0.3, 0.035, { when: d + 0.7 + i * 0.06, type: tri }));
   },
   "cut.whoosh": (d) => {
     noise(0.35, 0.07, { when: d, filter: "bandpass", freq: 400, sweepTo: 3000, q: 1.4, attack: 0.08 });

@@ -40,9 +40,9 @@ export interface Payout {
 export const BAG_CAP = 9;
 
 export const BOOSTER_INFO: Record<BoosterId, { label: string; blurb: string; price: number; sprite: string }> = {
-  blast: { label: "Blast", blurb: "Clears a cross on the board.", price: 60, sprite: "/sprites/heart.png" },
-  stripe: { label: "Stripe", blurb: "Turns any tile into a striped power.", price: 60, sprite: "/sprites/pill.png" },
-  aid: { label: "Aid", blurb: "Adds 5 moves.", price: 90, sprite: "/sprites/bandage.png" },
+  blast: { label: "Code Blast", blurb: "Clears a candy's whole row and column. Usable from ward 6.", price: 60, sprite: "/sprites/cross.png" },
+  stripe: { label: "Power Pill", blurb: "Turns any candy into a power piece. Usable from ward 6.", price: 60, sprite: "/sprites/pill.png" },
+  aid: { label: "First Aid", blurb: "Adds 5 moves. Usable from ward 6.", price: 90, sprite: "/sprites/bandage.png" },
 };
 
 /** One reward per day. Day 7 is the big one, then the run loops. */

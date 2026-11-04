@@ -9,12 +9,15 @@ export interface PerkFlash {
   planted: Pos[];
 }
 
-/** The toast and the board effect for a perk that just fired. Sits inside the board. */
-export function PerkFx({ fx, rows, cols }: { fx: PerkFlash; rows: number; cols: number }) {
+/**
+ * A perk that just fired. `part="toast"` is the name card, shown in the talk rail above the board;
+ * `part="board"` is the effect drawn inside the board.
+ */
+export function PerkFx({ fx, rows, cols, part }: { fx: PerkFlash; rows: number; cols: number; part: "toast" | "board" }) {
   const info = PERKS[fx.id];
   const at = (pos: Pos) => ({ left: `${((pos.c + 0.5) / cols) * 100}%`, top: `${((pos.r + 0.5) / rows) * 100}%` });
-  return (
-    <>
+  if (part === "toast") {
+    return (
       <div key={`toast-${fx.key}`} className={`perk-toast perk-${fx.id}`} role="status">
         <img src={info.icon} alt="" />
         <div>
@@ -22,6 +25,10 @@ export function PerkFx({ fx, rows, cols }: { fx: PerkFlash; rows: number; cols: 
           <span>{info.effect}</span>
         </div>
       </div>
+    );
+  }
+  return (
+    <>
       <div key={`fx-${fx.key}`} className={`perk-fx fx-${fx.id}`} aria-hidden>
         {fx.id === "vitals" ? (
           <svg className="ecg" viewBox="0 0 200 60" preserveAspectRatio="none">

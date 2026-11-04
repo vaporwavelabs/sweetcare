@@ -6,6 +6,7 @@
 @import "./story.css";
 @import "./prologue.css";
 @import "./level-end.css";
+@import "./powers.css";
 
 @theme {
   --color-pink: #fb3ba6;

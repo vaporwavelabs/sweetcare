@@ -1,0 +1,411 @@
+/* ---------- Talk rail: lines, perk names and power shouts sit above the board ---------- */
+
+.talk-rail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  pointer-events: none;
+}
+
+/* Boss, germ and healing wards: the stage is above the board, so the rail sits at its foot. */
+.talk-rail.arena {
+  bottom: 0.3rem;
+}
+
+.talk-rail .banner,
+.talk-rail .perk-toast {
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: none;
+  max-width: 100%;
+}
+
+.talk-rail .banner {
+  font-size: 1.15rem;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;
+  padding: 0.3rem 0.9rem;
+  animation: railIn 0.28s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+.talk-rail .perk-toast {
+  animation: railToast 1.9s cubic-bezier(0.2, 1.3, 0.4, 1) both;
+}
+
+@keyframes railIn {
+  from { transform: translateY(0.6rem) scale(0.7); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes railToast {
+  0% { transform: translateY(0.8rem) scale(0.6); opacity: 0; }
+  14% { transform: translateY(0) scale(1.05); opacity: 1; }
+  22% { transform: scale(1); }
+  82% { opacity: 1; }
+  100% { transform: translateY(-0.4rem); opacity: 0; }
+}
+
+/* ---------- Power shout ---------- */
+
+.power-callout {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 1.05rem 0.3rem 0.4rem;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #fff6c9, #ffd23f);
+  border: 3px solid #fff;
+  box-shadow: 0 0.28rem 0 #c2185b, 0 0.7rem 1.4rem rgba(120, 0, 60, 0.35);
+  animation: calloutSlam 1.55s cubic-bezier(0.2, 1.5, 0.35, 1) both;
+}
+
+.power-callout b {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: 1.55rem;
+  line-height: 1;
+  color: #d4145a;
+  letter-spacing: 0.01em;
+  text-shadow: 0 0.12rem 0 #fff;
+  white-space: nowrap;
+}
+
+.power-callout img {
+  position: relative;
+  width: 2.3rem;
+  height: 2.3rem;
+  object-fit: contain;
+  filter: drop-shadow(0 0.15rem 0.05rem rgba(120, 0, 60, 0.35));
+  animation: calloutIcon 0.7s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+
+.power-callout.power-blast {
+  background: linear-gradient(180deg, #ffe0e0, #ff5a6e);
+}
+
+.power-callout.power-blast b {
+  color: #fff;
+  text-shadow: 0 0.14rem 0 #a0002a;
+}
+
+.power-callout.power-aid {
+  background: linear-gradient(180deg, #e7fff0, #6ff0a8);
+}
+
+.power-callout.power-aid b {
+  color: #0b7a44;
+}
+
+.power-rays {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 13rem;
+  height: 13rem;
+  margin: -6.5rem 0 0 -6.5rem;
+  border-radius: 50%;
+  background: repeating-conic-gradient(rgba(255, 240, 140, 0.55) 0 10deg, transparent 10deg 24deg);
+  -webkit-mask-image: radial-gradient(circle, #000 18%, transparent 66%);
+  mask-image: radial-gradient(circle, #000 18%, transparent 66%);
+  z-index: -1;
+  animation: raysSpin 1.55s linear both;
+}
+
+@keyframes calloutSlam {
+  0% { transform: scale(2.6) rotate(-8deg); opacity: 0; }
+  14% { transform: scale(0.9) rotate(2deg); opacity: 1; }
+  22% { transform: scale(1.08) rotate(-1deg); }
+  30% { transform: scale(1) rotate(0); }
+  84% { transform: scale(1); opacity: 1; }
+  100% { transform: translateY(-0.6rem) scale(0.9); opacity: 0; }
+}
+
+@keyframes calloutIcon {
+  0% { transform: rotate(-200deg) scale(0.2); }
+  100% { transform: none; }
+}
+
+@keyframes raysSpin {
+  0% { transform: rotate(0) scale(0.3); opacity: 0; }
+  15% { opacity: 1; }
+  80% { opacity: 0.9; }
+  100% { transform: rotate(90deg) scale(1.1); opacity: 0; }
+}
+
+/* ---------- Aiming ---------- */
+
+.board-shell.aiming .board {
+  cursor: crosshair;
+}
+
+.board-shell.aiming::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 1.1rem;
+  pointer-events: none;
+  z-index: 5;
+  box-shadow: 0 0 0 3px #ffe14d, 0 0 1.4rem 0.3rem rgba(255, 225, 77, 0.65);
+  animation: aimGlow 0.9s ease-in-out infinite alternate;
+}
+
+.board-shell.aim-blast::after {
+  box-shadow: 0 0 0 3px #ff5a6e, 0 0 1.4rem 0.3rem rgba(255, 70, 100, 0.6);
+}
+
+.board-shell.aiming .tile .candy {
+  animation: aimBob 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes aimGlow {
+  from { opacity: 0.55; }
+  to { opacity: 1; }
+}
+
+@keyframes aimBob {
+  from { transform: scale(0.94); }
+  to { transform: scale(1.04); }
+}
+
+.aim-note img {
+  width: 1.5rem;
+  height: 1.5rem;
+  object-fit: contain;
+}
+
+.kit-toggle.aiming {
+  background: #fff6fb;
+  color: #d4145a;
+}
+
+.kit-toggle:disabled {
+  background: rgba(255, 78, 168, 0.55);
+  color: rgba(255, 247, 251, 0.92);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+}
+
+.kit-lock {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* ---------- Board effects ---------- */
+
+.power-fx {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  overflow: visible;
+}
+
+.pfx-beam {
+  position: absolute;
+  background: linear-gradient(90deg, transparent, #fff 20%, #ffe14d 50%, #fff 80%, transparent);
+  box-shadow: 0 0 1.2rem 0.4rem rgba(255, 90, 110, 0.75);
+  border-radius: 999px;
+  mix-blend-mode: screen;
+}
+
+.pfx-beam.row {
+  left: 0;
+  right: 0;
+  transform: translateY(-50%) scaleX(0);
+  animation: beamRow 0.75s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+.pfx-beam.col {
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, transparent, #fff 20%, #ffe14d 50%, #fff 80%, transparent);
+  transform: translateX(-50%) scaleY(0);
+  animation: beamCol 0.75s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+
+@keyframes beamRow {
+  0% { transform: translateY(-50%) scaleX(0); opacity: 1; }
+  40% { transform: translateY(-50%) scaleX(1.05) scaleY(1.3); opacity: 1; }
+  100% { transform: translateY(-50%) scaleX(1) scaleY(0.2); opacity: 0; }
+}
+
+@keyframes beamCol {
+  0% { transform: translateX(-50%) scaleY(0); opacity: 1; }
+  40% { transform: translateX(-50%) scaleY(1.05) scaleX(1.3); opacity: 1; }
+  100% { transform: translateX(-50%) scaleY(1) scaleX(0.2); opacity: 0; }
+}
+
+.pfx-ring {
+  position: absolute;
+  width: 3rem;
+  height: 3rem;
+  margin: -1.5rem 0 0 -1.5rem;
+  border-radius: 50%;
+  border: 4px solid #fff;
+  box-shadow: 0 0 1rem 0.2rem rgba(255, 90, 110, 0.8), inset 0 0 0.8rem rgba(255, 225, 77, 0.8);
+  animation: ringOut 0.7s ease-out both;
+}
+
+.pfx-ring.late {
+  animation-delay: 0.14s;
+}
+
+.pfx-ring.pill {
+  box-shadow: 0 0 1rem 0.2rem rgba(77, 125, 255, 0.85), inset 0 0 0.8rem rgba(255, 225, 77, 0.8);
+  animation-delay: 0.42s;
+}
+
+@keyframes ringOut {
+  0% { transform: scale(0.2); opacity: 1; }
+  100% { transform: scale(4.2); opacity: 0; border-width: 1px; }
+}
+
+.pfx-core {
+  position: absolute;
+  width: 2.4rem;
+  height: 2.4rem;
+  margin: -1.2rem 0 0 -1.2rem;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, #ffe14d 40%, rgba(255, 90, 110, 0) 70%);
+  animation: coreFlash 0.5s ease-out both;
+}
+
+@keyframes coreFlash {
+  0% { transform: scale(0.3); opacity: 1; }
+  50% { transform: scale(2.2); opacity: 1; }
+  100% { transform: scale(3); opacity: 0; }
+}
+
+.pfx-drop {
+  position: absolute;
+  width: 3.2rem;
+  height: 3.2rem;
+  margin: -1.6rem 0 0 -1.6rem;
+  animation: pillDrop 0.95s cubic-bezier(0.3, 0, 0.3, 1) both;
+}
+
+.pfx-drop img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 0 0.5rem rgba(255, 255, 255, 0.95)) drop-shadow(0 0 1rem rgba(77, 125, 255, 0.8));
+}
+
+@keyframes pillDrop {
+  0% { transform: translateY(-9rem) rotate(-540deg) scale(2.2); opacity: 0; }
+  20% { opacity: 1; }
+  44% { transform: translateY(0) rotate(0) scale(1.2); }
+  56% { transform: translateY(0) scale(0.85, 1.15); }
+  68% { transform: translateY(0) scale(1.15); opacity: 1; }
+  100% { transform: translateY(0) scale(0.4); opacity: 0; }
+}
+
+.pfx-spark {
+  position: absolute;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin: -0.275rem 0 0 -0.275rem;
+  border-radius: 50%;
+  background: #ffe14d;
+  box-shadow: 0 0 0.5rem 0.15rem rgba(255, 255, 255, 0.9);
+  animation: sparkOut 0.6s ease-out 0.44s both;
+}
+
+@keyframes sparkOut {
+  0% { transform: rotate(var(--a)) translateX(0) scale(1.3); opacity: 1; }
+  100% { transform: rotate(var(--a)) translateX(3.6rem) scale(0.2); opacity: 0; }
+}
+
+.pfx-heal {
+  position: absolute;
+  inset: 0;
+  border-radius: 1rem;
+  background: radial-gradient(circle, rgba(111, 240, 168, 0.55), rgba(111, 240, 168, 0.12) 55%, transparent 75%);
+  animation: healWash 1.3s ease-out both;
+}
+
+@keyframes healWash {
+  0% { opacity: 0; transform: scale(0.6); }
+  25% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; }
+}
+
+.pfx-rain {
+  position: absolute;
+  top: 0;
+  width: 2.2rem;
+  height: 2.2rem;
+  margin-left: -1.1rem;
+  object-fit: contain;
+  filter: drop-shadow(0 0.2rem 0.1rem rgba(0, 80, 40, 0.3));
+  animation: rainFall 1.2s cubic-bezier(0.4, 0, 0.7, 1) both;
+}
+
+@keyframes rainFall {
+  0% { transform: translateY(-3rem) rotate(-30deg) scale(0.6); opacity: 0; }
+  15% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { transform: translateY(var(--fall, 20rem)) rotate(40deg) scale(1); opacity: 0; }
+}
+
+.pfx-plus {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  font-family: var(--font-display);
+  font-size: 2.3rem;
+  color: #fff;
+  -webkit-text-stroke: 2px #0b7a44;
+  text-shadow: 0 0.25rem 0 #0b7a44, 0 0 1rem rgba(111, 240, 168, 0.9);
+  white-space: nowrap;
+  animation: plusRise 1.4s cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+
+@keyframes plusRise {
+  0% { transform: translate(-50%, 1rem) scale(0.3); opacity: 0; }
+  20% { transform: translate(-50%, 0) scale(1.15); opacity: 1; }
+  30% { transform: translate(-50%, 0) scale(1); }
+  75% { opacity: 1; }
+  100% { transform: translate(-50%, -3rem) scale(0.9); opacity: 0; }
+}
+
+/* Less motion: shouts and lines just appear; the board effects are skipped. */
+@media (prefers-reduced-motion: reduce) {
+  .power-callout,
+  .power-callout img,
+  .board-shell.aiming::after,
+  .board-shell.aiming .tile .candy,
+  .talk-rail .banner,
+  .talk-rail .perk-toast {
+    animation: none;
+  }
+  .power-rays,
+  .power-fx {
+    display: none;
+  }
+}
+
+:root[data-motion="reduced"] .power-callout,
+:root[data-motion="reduced"] .power-callout img,
+:root[data-motion="reduced"] .board-shell.aiming::after,
+:root[data-motion="reduced"] .board-shell.aiming .tile .candy,
+:root[data-motion="reduced"] .talk-rail .banner,
+:root[data-motion="reduced"] .talk-rail .perk-toast {
+  animation: none;
+}
+
+:root[data-motion="reduced"] .power-rays,
+:root[data-motion="reduced"] .power-fx {
+  display: none;
+}
