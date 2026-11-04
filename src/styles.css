@@ -430,6 +430,101 @@
   transform-origin: 50% 70%;
 }
 
+.karen-sprite {
+  display: block;
+  width: 100%;
+  aspect-ratio: 180 / 240;
+  background: url("/sprites/karen-walk-sheet.webp") 0 0 / 1200% 700% no-repeat;
+  animation: karenEnter 0.75s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+/* She steps in through the ward doors instead of popping in. */
+@keyframes karenEnter {
+  0% { opacity: 0; transform: translateY(-18%) scale(0.72); filter: blur(3px); }
+  60% { opacity: 1; filter: none; }
+  100% { opacity: 1; transform: none; }
+}
+
+/* Damage to the player: the whole screen flashes red from the edges, and the life bar shakes and shows the hit. */
+.hurt-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at center, transparent 42%, rgba(255, 20, 60, 0.55) 100%),
+    rgba(255, 30, 70, 0.22);
+  animation: hurtFlash 0.6s ease-out forwards;
+}
+
+.hurt-flash.critical {
+  animation: hurtFlash 0.85s ease-out forwards;
+  background:
+    radial-gradient(ellipse at center, transparent 30%, rgba(220, 0, 40, 0.7) 100%),
+    rgba(255, 20, 50, 0.32);
+}
+
+@keyframes hurtFlash {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.vital.life {
+  position: relative;
+}
+
+.vital.life.hit .vital-bar {
+  animation: lifeHit 0.4s linear;
+  box-shadow: 0 0 0.5rem rgba(255, 45, 85, 0.95);
+}
+
+@keyframes lifeHit {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
+
+.hit-pop {
+  position: absolute;
+  right: 2.4rem;
+  top: -0.2rem;
+  z-index: 2;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: #ff2d55;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 2px 0 #b3002f;
+  pointer-events: none;
+  animation: hitPop 0.9s ease-out forwards;
+}
+
+@keyframes hitPop {
+  0% { opacity: 0; transform: translateY(4px) scale(0.6); }
+  18% { opacity: 1; transform: translateY(-2px) scale(1.15); }
+  70% { opacity: 1; transform: translateY(-6px) scale(1); }
+  100% { opacity: 0; transform: translateY(-12px) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .karen-sprite,
+  .vital.life.hit .vital-bar {
+    animation: none;
+  }
+  .hurt-flash,
+  .hurt-flash.critical {
+    animation: hurtFlash 0.6s step-end forwards;
+  }
+}
+
 .objectives {
   position: absolute;
   z-index: 4;
@@ -2728,6 +2823,156 @@ button.outro {
 .crush-hud .bar > span {
   background: linear-gradient(90deg, #3dce6a, #d6e35a 58%, #f0c14a 78%, #7a5cff);
   box-shadow: 0 0 0.4rem rgba(214, 227, 90, 0.8);
+}
+
+/* Boss and microbe stages: both health bars live inside the one-line header. */
+.hud-vitals {
+  display: grid;
+  gap: 0.16rem;
+  margin-top: 0.2rem;
+}
+
+.vital {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr) 2.1rem;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.vital-tag {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.56rem;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.92;
+}
+
+.vital-num {
+  font-size: 0.66rem;
+  font-weight: 800;
+  line-height: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.vital-bar {
+  position: relative;
+  height: 0.6rem;
+  border-radius: 999px;
+  background: #5c2458;
+  border: 2px solid var(--color-cream);
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.vital-bar > span,
+.vital-bar > em {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+}
+
+.vital-bar > em {
+  background: #fff3b0;
+  transition: width 0.55s ease-in 0.3s;
+}
+
+.vital-bar > span {
+  transition: width 0.18s ease-out;
+}
+
+.vital.foe .vital-bar > span {
+  background: linear-gradient(90deg, #ff2d55, #ff8a3d 60%, #ffb703);
+}
+
+.vital.foe.germs .vital-bar > span {
+  background: linear-gradient(90deg, #7d5cff, #c7a6ff);
+}
+
+.vital.foe.guarded .vital-bar > span {
+  background: linear-gradient(90deg, #8fb4ff, #dfe8ff);
+}
+
+.vital.life .vital-bar > span {
+  background: linear-gradient(90deg, #1fbf63, #c6f26a);
+}
+
+.vital.life.low .vital-bar > span {
+  background: linear-gradient(90deg, #ff2d55, #ff9f43);
+}
+
+.vital-bar > s {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: rgba(92, 36, 88, 0.55);
+  text-decoration: none;
+}
+
+.crush-hud .phase-pips {
+  flex: none;
+  margin-left: auto;
+}
+
+.crush-hud .phase-pips b {
+  background: rgba(255, 247, 251, 0.45);
+}
+
+.crush-hud .phase-pips b.on {
+  background: var(--color-cream);
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.9);
+}
+
+.crush-hud.phase-1 {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    0 0.18rem 0 #e21880,
+    0 0 0 2px rgba(255, 140, 60, 0.7);
+}
+
+.crush-hud.phase-2 {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.38),
+    0 0.18rem 0 #e21880,
+    0 0 0 2px rgba(255, 45, 85, 0.85),
+    0 0 0.8rem rgba(255, 45, 85, 0.55);
+}
+
+.crush-hud.stung {
+  animation: shake 0.28s linear;
+}
+
+.boss-strip.emergency-strip {
+  padding: 0.2rem 0.5rem;
+}
+
+.boss-strip.emergency-strip .emergency-meter {
+  border-top: 0;
+  padding: 0;
+  gap: 0.12rem;
+}
+
+.boss-strip.emergency-strip .boss-bar {
+  height: 0.5rem;
+  margin-top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crush-hud.stung {
+    animation: none;
+  }
+  .vital-bar > span,
+  .vital-bar > em {
+    transition: none;
+  }
 }
 
 .hud-score,
