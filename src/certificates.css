@@ -1,0 +1,627 @@
+/*
+ * Certificates: island fences, closed-path signs, the Certificate Center pin and sheet,
+ * and the diploma stamp. Logic in src/game/certificates.ts.
+ */
+
+/* ---------- Fences on the island ---------- */
+
+.roam-fences {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.roam-fences .hatch-bg {
+  fill: rgba(60, 20, 50, 0.32);
+}
+
+.roam-fences .hatch-stripe {
+  fill: rgba(255, 210, 90, 0.2);
+}
+
+.roam-fence {
+  fill: url(#roam-hatch);
+  stroke: var(--sc-gold);
+  stroke-width: 6;
+  stroke-dasharray: 18 10;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 3px rgba(80, 0, 40, 0.6));
+  animation: fence-march 2.4s linear infinite;
+}
+
+.roam-fence.peds {
+  stroke: #7cc8ff;
+}
+
+.roam-fence.wound {
+  stroke: #ff8a8a;
+}
+
+.roam-fence.falling {
+  animation: fence-fall 1.5s ease-in both;
+}
+
+@keyframes fence-march {
+  to { stroke-dashoffset: -56; }
+}
+
+@keyframes fence-fall {
+  0% { opacity: 1; stroke-width: 6; }
+  25% { opacity: 1; stroke-width: 14; stroke: #fff; }
+  100% { opacity: 0; stroke-width: 0; }
+}
+
+/* "Closed" signs on the paths into a fenced district. */
+.roam-sign {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translate(-50%, -100%) scale(var(--inv, 1));
+  transform-origin: 50% 100%;
+  cursor: pointer;
+  animation: sign-sway 3.2s ease-in-out infinite;
+}
+
+.roam-sign-board {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.55rem 0.25rem 0.35rem;
+  border-radius: 0.55rem;
+  background: repeating-linear-gradient(-45deg, #ffd25a 0 0.5rem, #3a1030 0.5rem 1rem);
+  box-shadow: 0 0.18rem 0 rgba(60, 10, 40, 0.5);
+}
+
+.roam-sign-board > span {
+  display: flex;
+  flex-direction: column;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.35rem;
+  background: var(--sc-surface);
+  color: var(--sc-ink);
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.roam-sign-board small {
+  font-family: inherit;
+  font-size: 0.56rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--sc-ink-soft);
+}
+
+.roam-sign-board svg {
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0.18rem;
+  border-radius: 50%;
+  background: var(--sc-surface);
+  color: var(--sc-accent);
+}
+
+.roam-sign-post {
+  width: 0.3rem;
+  height: 0.9rem;
+  border-radius: 0 0 0.2rem 0.2rem;
+  background: #8a5a3a;
+}
+
+@keyframes sign-sway {
+  0%, 100% { rotate: -2deg; }
+  50% { rotate: 2deg; }
+}
+
+/* ---------- Certificate Center pin ---------- */
+
+.roam-center {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transform: translate(-50%, -50%) scale(var(--inv, 1));
+  transition: transform 0.25s var(--sc-ease-pop);
+  cursor: pointer;
+}
+
+.roam-center.focus {
+  z-index: 4;
+  transform: translate(-50%, -50%) scale(var(--inv, 1)) scale(1.12);
+  filter: drop-shadow(0 0 0.5rem rgba(255, 201, 74, 0.95));
+}
+
+.roam-center-face {
+  display: grid;
+  place-items: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 0.8rem;
+  background: linear-gradient(160deg, #fff7d6, var(--sc-gold));
+  color: #8a4b00;
+  border: 0.16rem solid #fff;
+  box-shadow: 0 0.2rem 0 var(--sc-gold-deep), 0 0.4rem 0.8rem rgba(80, 30, 0, 0.35);
+}
+
+.roam-center-face svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.roam-center.ready .roam-center-face {
+  animation: center-ready 1.2s ease-in-out infinite;
+}
+
+.roam-center-label {
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(106, 24, 72, 0.88);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+@keyframes center-ready {
+  0%, 100% { translate: 0 0; box-shadow: 0 0.2rem 0 var(--sc-gold-deep), 0 0 0 0 rgba(255, 210, 90, 0.8); }
+  50% { translate: 0 -0.2rem; box-shadow: 0 0.2rem 0 var(--sc-gold-deep), 0 0 0 0.5rem rgba(255, 210, 90, 0); }
+}
+
+.roam-door.center {
+  box-shadow: 0 0 0 0.12rem var(--sc-gold-deep);
+}
+
+/* Cards in hand + certificates earned, in the map HUD. */
+.roam-chip.cards {
+  gap: 0.35rem;
+}
+
+.roam-card-icon {
+  width: 0.75rem;
+  height: 1rem;
+  border-radius: 0.18rem;
+  background: linear-gradient(150deg, #ff9bd0, var(--sc-accent));
+  box-shadow: 0.14rem -0.1rem 0 #ffd0e8, 0.28rem -0.2rem 0 #ffe3f1;
+}
+
+.roam-cert-dots {
+  display: inline-flex;
+  gap: 0.14rem;
+  margin-left: 0.1rem;
+}
+
+.roam-cert-dots i {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: var(--sc-lock);
+}
+
+.roam-cert-dots i.on {
+  background: var(--sc-gold-deep);
+}
+
+.roam-zone.roam-bump {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  background: #3a1030;
+  box-shadow: 0 0.2rem 0 #000;
+}
+
+.roam-zone.roam-bump svg {
+  width: 1.1rem;
+  height: 1.1rem;
+  color: var(--sc-gold);
+}
+
+.roam-card.center {
+  box-shadow: 0 0.3rem 0 var(--sc-gold-deep), 0 0.8rem 1.6rem rgba(60, 10, 40, 0.3);
+}
+
+/* ---------- Certificate Center sheet ---------- */
+
+.cert-sheet {
+  position: relative;
+}
+
+.cert-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.8rem;
+}
+
+.cert-head h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  color: var(--sc-accent);
+  line-height: 1.05;
+}
+
+.cert-head p {
+  margin: 0.15rem 0 0;
+  font-weight: 700;
+  font-size: 0.86rem;
+  color: var(--sc-ink-soft);
+}
+
+.cert-head-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.8rem;
+  height: 2.8rem;
+  border-radius: 0.9rem;
+  background: linear-gradient(160deg, #fff7d6, var(--sc-gold));
+  color: #8a4b00;
+  box-shadow: 0 0.2rem 0 var(--sc-gold-deep);
+}
+
+.cert-head-icon svg {
+  width: 1.6rem;
+  height: 1.6rem;
+}
+
+.cert-close {
+  margin-left: auto;
+}
+
+.cert-hand {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--sc-radius-md);
+  background: var(--sc-surface-2);
+  margin-bottom: 0.8rem;
+}
+
+.cert-fan {
+  position: relative;
+  flex: none;
+  width: 5.6rem;
+  height: 4.2rem;
+}
+
+.cert-fan img,
+.cert-fan-empty {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 2.6rem;
+  height: 3.6rem;
+  object-fit: cover;
+  border-radius: 0.35rem;
+  border: 0.14rem solid #fff;
+  box-shadow: 0 0.2rem 0.4rem rgba(80, 0, 40, 0.3);
+  transform-origin: 50% 120%;
+  transform: translateX(-50%) rotate(calc(var(--spread, 0) * 22deg)) translateX(calc(var(--spread, 0) * 0.6rem));
+}
+
+.cert-fan-empty {
+  border-style: dashed;
+  border-color: var(--sc-lock);
+  background: transparent;
+  box-shadow: none;
+}
+
+.cert-hand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-weight: 800;
+  color: var(--sc-ink);
+}
+
+.cert-hand-text strong {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  color: var(--sc-accent);
+  margin-right: 0.15rem;
+}
+
+.cert-hand-text small {
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--sc-ink-soft);
+}
+
+.cert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+}
+
+.cert-row {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.7rem;
+  border-radius: var(--sc-radius-md);
+  background: #fff;
+  box-shadow: 0 0.16rem 0 rgba(150, 0, 70, 0.18);
+}
+
+.cert-row.wanted {
+  outline: 0.18rem solid var(--sc-gold);
+  animation: cert-wanted 1.2s ease-in-out 2;
+}
+
+.cert-row.blocked {
+  opacity: 0.65;
+}
+
+.cert-row.earned {
+  background: linear-gradient(90deg, #e9fff1, #fff);
+}
+
+.cert-badge {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--sc-accent);
+  box-shadow: 0 0.16rem 0 rgba(80, 0, 40, 0.35);
+}
+
+.cert-row.peds .cert-badge { background: #3fa4e8; }
+.cert-row.wound .cert-badge { background: #ef5b5b; }
+.cert-row.earned .cert-badge { background: var(--sc-mint-deep); }
+
+.cert-badge svg {
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.cert-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.cert-info strong {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  color: var(--sc-ink);
+}
+
+.cert-info > span {
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: var(--sc-ink-soft);
+}
+
+.cert-pips {
+  display: flex;
+  gap: 0.2rem;
+  margin-top: 0.15rem;
+}
+
+.cert-pips i {
+  width: 0.7rem;
+  height: 0.95rem;
+  border-radius: 0.15rem;
+  background: var(--sc-surface-2);
+  border: 0.1rem dashed var(--sc-lock);
+}
+
+.cert-pips i.on {
+  background: linear-gradient(150deg, #ff9bd0, var(--sc-accent));
+  border: 0.1rem solid #fff;
+}
+
+.cert-buy {
+  flex: none;
+  min-width: 6.4rem;
+  font-size: 0.9rem;
+  padding: 0.5rem 0.7rem;
+}
+
+.cert-done,
+.cert-wait {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: none;
+  font-weight: 900;
+  font-size: 0.82rem;
+}
+
+.cert-done { color: var(--sc-mint-deep); }
+.cert-wait { color: var(--sc-ink-soft); }
+
+.cert-done svg,
+.cert-wait svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.cert-foot {
+  margin: 0.8rem 0 0;
+  text-align: center;
+  font-weight: 800;
+  color: var(--sc-mint-deep);
+}
+
+@keyframes cert-wanted {
+  50% { outline-color: var(--sc-accent); }
+}
+
+/* ---------- Diploma stamp ---------- */
+
+.cert-stamp {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  padding: 1rem;
+  background: rgba(50, 0, 30, 0.9);
+  animation: sc-fade 0.2s ease both;
+}
+
+.cert-diploma {
+  position: relative;
+  width: min(20rem, 88vw);
+  padding: 1.6rem 1.2rem 1.4rem;
+  border-radius: 0.6rem;
+  text-align: center;
+  color: #4a2a10;
+  background: radial-gradient(circle at 50% 0, #fffdf3, #fbefd0);
+  border: 0.35rem double #c9973a;
+  box-shadow: 0 1rem 2.4rem rgba(0, 0, 0, 0.45);
+  animation: diploma-in 0.6s var(--sc-ease-pop) both;
+}
+
+.cert-diploma small {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9b7a4a;
+}
+
+.cert-diploma .cert-name {
+  display: block;
+  margin: 0.2rem 0 0.3rem;
+  font-family: var(--font-display);
+  font-size: 1.6rem;
+  color: var(--sc-accent);
+}
+
+.cert-diploma h4 {
+  margin: 0.25rem 0 0.4rem;
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+}
+
+.cert-diploma p {
+  margin: 0;
+  font-style: italic;
+  font-weight: 700;
+  font-size: 0.86rem;
+}
+
+.cert-diploma-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  margin-bottom: 0.4rem;
+  border-radius: 50%;
+  background: var(--sc-gold);
+  color: #7a3f00;
+  box-shadow: 0 0.2rem 0 var(--sc-gold-deep);
+}
+
+.cert-diploma-badge svg {
+  width: 1.7rem;
+  height: 1.7rem;
+}
+
+.cert-ribbon {
+  position: absolute;
+  top: -0.35rem;
+  left: 1rem;
+  width: 1.2rem;
+  height: 3rem;
+  background: var(--sc-accent);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
+}
+
+.cert-seal {
+  position: absolute;
+  right: -0.6rem;
+  bottom: -0.8rem;
+  padding: 0.35rem 0.7rem;
+  border: 0.22rem solid #e0245e;
+  border-radius: 0.4rem;
+  color: #e0245e;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  background: rgba(255, 255, 255, 0.6);
+  rotate: -14deg;
+  animation: seal-slam 0.5s 0.35s cubic-bezier(0.3, 1.8, 0.5, 1) both;
+}
+
+.cert-open-note {
+  margin: 0;
+  color: #fff;
+  font-weight: 800;
+  text-align: center;
+  text-shadow: 0 0.1rem 0.3rem rgba(0, 0, 0, 0.6);
+  animation: sc-fade 0.4s 0.8s ease both;
+}
+
+@keyframes diploma-in {
+  from { transform: translateY(2rem) scale(0.7) rotate(-6deg); opacity: 0; }
+}
+
+@keyframes seal-slam {
+  from { transform: scale(3); opacity: 0; }
+  60% { opacity: 1; }
+}
+
+.card-reveal-note {
+  position: relative;
+  z-index: 2;
+  max-width: 18rem;
+  margin: 0.6rem auto;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(255, 247, 251, 0.92);
+  color: var(--sc-ink);
+  font-weight: 800;
+  font-size: 0.84rem;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roam-fence,
+  .roam-sign,
+  .roam-center.ready .roam-center-face,
+  .cert-diploma,
+  .cert-seal {
+    animation: none !important;
+  }
+}
+
+:root[data-motion="reduced"] .roam-fence:not(.falling),
+:root[data-motion="reduced"] .roam-sign,
+:root[data-motion="reduced"] .roam-center.ready .roam-center-face {
+  animation: none !important;
+}

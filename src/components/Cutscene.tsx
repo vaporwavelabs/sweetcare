@@ -249,6 +249,36 @@ function StorySet({ set, name }: { set: SetId; name: string }) {
           </div>
         </>
       ) : null}
+      {set === "debt" ? (
+        <>
+          <div className="s-gloom" />
+          <div className="s-bill">
+            <small>Student Loan Statement</small>
+            <b>$87,412.06</b>
+            <ul>
+              <li><span>Tuition</span><em>$$$$</em></li>
+              <li><span>Scrubs (4 colors)</span><em>$$</em></li>
+              <li><span>Interest</span><em>yes</em></li>
+              <li><span>Interest on interest</span><em>also yes</em></li>
+            </ul>
+            <i>Payment due: forever</i>
+          </div>
+        </>
+      ) : null}
+      {set === "rejects" ? (
+        <>
+          <div className="s-gloom" />
+          <div className="s-pile">
+            {n(4).map((i) => <span key={i} style={{ ["--i" as string]: String(i) }} />)}
+            <div className="s-reject">
+              <small>Re: Your application</small>
+              <b>Unfortunately...</b>
+              <span>We require 2+ years of experience.</span>
+              <em>(Clinicals do not count.)</em>
+            </div>
+          </div>
+        </>
+      ) : null}
       {set === "letter" ? (
         <>
           <div className="s-rays soft" />
@@ -256,7 +286,7 @@ function StorySet({ set, name }: { set: SetId; name: string }) {
             <div className="s-paper">
               <small>Sweet Care Island Hospital</small>
               <b>You're hired!</b>
-              <span>Dear {name || "Nurse"}, a ward is waiting for you.</span>
+              <span>No experience? No problem, {name || "Nurse"}!</span>
             </div>
             <div className="s-pocket" />
             <div className="s-seal">♥</div>

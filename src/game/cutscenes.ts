@@ -12,7 +12,7 @@ export type ActorId = "you" | "teddy" | "karen" | "germ";
 export type Pose = "enter" | "bounce" | "shake" | "dizzy" | "stomp" | "exit" | "glow";
 export type SceneFx = "alarm" | "flash" | "sparkle" | "paper" | "flood" | "hearts" | "spores" | "stamp" | "caps" | "confetti";
 /** Illustrated backdrops drawn in CSS (src/prologue.css) instead of a photo. */
-export type SetId = "campus" | "study" | "exam" | "exam-off" | "result" | "letter" | "ferry" | "island";
+export type SetId = "campus" | "study" | "exam" | "exam-off" | "result" | "debt" | "rejects" | "letter" | "ferry" | "island";
 
 export interface Beat {
   /** Who is talking. Leave out for a narrator caption. */
@@ -60,24 +60,19 @@ export const SCENES: Record<SceneId, Scene> = {
     set: "campus",
     music: "cutscene",
     beats: [
-      { card: { kicker: "Prologue", title: "Graduation day", tone: "story" }, fx: "sparkle", sfx: "cut.sparkle" },
-      { line: "Four years of care plans, clinicals and 5 a.m. alarms. All of it, for one walk across this stage." },
-      { left: "you", pose: { you: "enter" }, speaker: "you", line: "They just called my name. {name}, Bachelor of Science in Nursing!", sfx: "cut.whoosh" },
-      { pose: { you: "bounce" }, fx: "caps", sfx: "cut.sparkle", speaker: "you", line: "I DID IT! Caps in the air, everybody!" },
-      { pose: { you: "shake" }, fx: "alarm", sfx: "cut.thud", line: "But one last test still stands between a graduate and a nurse..." },
-      { set: "study", card: { kicker: "Six weeks later", title: "The NCLEX", tone: "boss" }, sfx: "cut.alarm", music: "microbe" },
-      { fx: "paper", sfx: "cut.blip", speaker: "you", line: "Priorities. Delegation. Lab values. I'm answering select-all-that-apply in my sleep." },
-      { pose: { you: "dizzy" }, speaker: "you", line: "One more practice set. And maybe one more coffee." },
-      { set: "exam", music: "boss", sfx: "cut.door", line: "Exam day. Question after question after question..." },
-      { set: "exam-off", fx: "flash", sfx: "cut.gasp", line: "Then, without warning, the screen goes dark." },
-      { pose: { you: "shake" }, sfx: "cut.thud", speaker: "you", line: "Wait. Did it shut off because I passed... or because I failed?!" },
-      { set: "result", music: "heal", fx: "stamp", stamp: "PASSED", sfx: "cut.stamp", line: "The results are in." },
-      { pose: { you: "glow" }, fx: "confetti", sfx: "reward.levelup", speaker: "you", line: "{name}, RN. I'm a real nurse!" },
-      { set: "letter", right: "teddy", pose: { teddy: "enter" }, sfx: "cut.door", speaker: "teddy", line: "Congratulations, {name}! Chief Teddy here, from Sweet Care Island Hospital." },
-      { pose: { teddy: "bounce" }, fx: "hearts", sfx: "cut.sparkle", speaker: "teddy", line: "Our little patients need a nurse with a big heart. Your ferry leaves at dawn!" },
-      { set: "ferry", left: null, right: null, pose: { you: "exit", teddy: "exit" }, music: "title", sfx: "cut.whoosh", line: "Across the candy sea, past the lighthouse, an island is waiting..." },
+      { card: { kicker: "Prologue", title: "Graduation day", tone: "story" }, fx: "caps", sfx: "cut.sparkle" },
+      { left: "you", pose: { you: "bounce" }, sfx: "cut.whoosh", speaker: "you", line: "{name}, BSN! Four years, zero sleep, and one very expensive hat." },
+      { set: "exam", music: "boss", sfx: "cut.door", line: "Next up: the NCLEX. Question after question after question..." },
+      { set: "exam-off", fx: "flash", pose: { you: "shake" }, sfx: "cut.gasp", speaker: "you", line: "It shut off at 85! Did I pass?! Did I FAIL?!" },
+      { set: "result", music: "heal", fx: "stamp", stamp: "PASSED", pose: { you: "glow" }, sfx: "cut.stamp", speaker: "you", line: "{name}, RN! Hospitals are gonna fight over me!" },
+      { set: "debt", music: "microbe", fx: "paper", pose: { you: "dizzy" }, sfx: "cut.thud", line: "Also in the mail: your student loans. With interest. With feelings." },
+      { set: "rejects", fx: "stamp", stamp: "REJECTED", pose: { you: "shake" }, sfx: "cut.stamp", line: "47 applications. 47 replies: \"Sorry, we need nurses with experience.\"" },
+      { speaker: "you", line: "But I did clinicals! Hundreds of hours!" },
+      { fx: "alarm", sfx: "cut.alarm", line: "Clinicals don't count." },
+      { set: "letter", music: "cutscene", right: "teddy", pose: { teddy: "enter", you: "bounce" }, fx: "hearts", sfx: "cut.door", speaker: "teddy", line: "Chief Teddy, Sweet Care Island! Experience required: none. Candy skills: a plus. Ferry leaves at dawn!" },
+      { set: "ferry", left: null, right: null, pose: { you: "exit", teddy: "exit" }, music: "title", sfx: "cut.whoosh", line: "So you sailed off to the one hospital desperate enough to hire you." },
       { set: "island", music: "map", card: { kicker: "Welcome to", title: "Sweet Care Island", tone: "heal" }, fx: "sparkle", sfx: "map.unlock" },
-      { line: "Wards, clinics and labs, all full of patients. Walk to Ward 1 to start your first shift." },
+      { line: "Your first job! Walk to Ward 1 and start earning that experience." },
     ],
   },
   intro: {
