@@ -5,6 +5,7 @@ import { defaultPrefs, readPrefs, type Prefs } from "./prefs.ts";
 import { defaultWallet, readWallet, type Wallet } from "./rewards.ts";
 import { FORM_SIZE, type FormEntry } from "./wardEvolution.ts";
 import { defaultEvolution, readEvolution, type Evolution } from "./evolution.ts";
+import { readCerts, type CertId } from "./certificates.ts";
 
 export interface DecorPin {
   id: string;
@@ -44,6 +45,10 @@ export interface SaveData {
   form: FormEntry[];
   /** Care Points, evolution stage and win streak (src/game/evolution.ts). */
   evolution: Evolution;
+  /** Certificates earned at the Certificate Center (src/game/certificates.ts). */
+  certs: CertId[];
+  /** Gift cards handed in for certificates. */
+  cardsSpent: number;
 }
 
 const KEY = "sweet-care-save-v1";
@@ -51,7 +56,7 @@ const KEY = "sweet-care-save-v1";
 const LAST_LEVEL = 30;
 
 export function defaultSave(): SaveData {
-  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [], prefs: defaultPrefs(), wallet: defaultWallet(), form: [], evolution: defaultEvolution() };
+  return { version: 1, unlocked: 1, stars: {}, best: {}, times: {}, sound: true, music: true, haptics: true, career: defaultCareer(), gifts: [], openedGifts: [], seeds: {}, attemptShifts: {}, clears: {}, loot: false, decor: [], prefs: defaultPrefs(), wallet: defaultWallet(), form: [], evolution: defaultEvolution(), certs: [], cardsSpent: 0 };
 }
 
 export function rememberOpened(opened: number[] | undefined, levelId: number): number[] {
@@ -95,6 +100,8 @@ export function loadSave(): SaveData {
       wallet: readWallet(parsed.wallet),
       form: readForm(parsed.form),
       evolution: readEvolution(parsed.evolution),
+      certs: readCerts(parsed.certs),
+      cardsSpent: typeof parsed.cardsSpent === "number" && Number.isFinite(parsed.cardsSpent) ? Math.max(0, Math.floor(parsed.cardsSpent)) : 0,
     };
   } catch {
     return defaultSave();

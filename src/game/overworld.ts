@@ -6,6 +6,7 @@
  * the same in every direction whatever the screen shape.
  */
 import { MAP_SPOTS, WARD_IDS, wardsOpen } from "./levels.ts";
+import { CENTER_DOOR, CENTER_PIN, CERTIFICATES, fencesFor, hasGift, missingCert, type CertId } from "./certificates.ts";
 
 export const MAP_W = 1500;
 export const MAP_H = 844;
@@ -127,6 +128,7 @@ export interface ProgressLike {
   unlocked: number;
   stars: Record<string, number>;
   openedGifts?: number[];
+  certs?: CertId[];
 }
 
 export interface NodeState {
@@ -143,7 +145,11 @@ export function nodeState(save: ProgressLike, id: number): NodeState {
   const stars = save.stars[String(id)] ?? 0;
   let locked = false;
   let reason: string | null = null;
-  if (id <= 15 && id > save.unlocked) {
+  const cert = missingCert(save, id);
+  if (cert) {
+    locked = true;
+    reason = `Fenced off. Needs the ${cert.name}: hand in cards at the Certificate Center.`;
+  } else if (id <= 15 && id > save.unlocked) {
     locked = true;
     reason = `Clear ward ${id - 1} to open this one.`;
   } else if ((WARD_IDS as readonly number[]).includes(id) && !wardsOpen(save.stars)) {
@@ -151,7 +157,7 @@ export function nodeState(save: ProgressLike, id: number): NodeState {
     reason = "Beat Nurse Karen in ward 5 to open the side wards.";
   }
   const cleared = stars >= 1 || (id <= 15 && id < save.unlocked);
-  const giftWaiting = !locked && cleared && MAP_SPOTS.some((spot) => spot.id === id) && !(save.openedGifts ?? []).includes(id);
+  const giftWaiting = !locked && cleared && hasGift(id) && !(save.openedGifts ?? []).includes(id);
   return { locked, reason, stars, cleared, giftWaiting };
 }
 
@@ -176,9 +182,53 @@ export function buildingAt(p: Pt): Building | null {
   return null;
 }
 
-/** Feet can stand here: on the island and outside every building. */
-export function walkable(p: Pt): boolean {
+/* ---------- Certificate fences ---------- */
+
+let fencePolys: Array<{ cert: CertId; poly: Pt[] }> = [];
+let fenceKey = "";
+
+/** All fence polygons of a certificate, in art pixels. */
+export function fencePolysFor(id: CertId): Pt[][] {
+  return fencesFor(id).map((poly) => poly.map(([x, y]) => pct(x, y)));
+}
+
+/**
+ * Close the districts of the certificates the player has not earned yet. Walking,
+ * pathfinding and spawning respect the fences from then on. Doorsteps and the roads
+ * drawn on the map do not, so they stay put when a fence comes down.
+ */
+export function setFences(locked: CertId[]) {
+  const key = [...locked].sort().join(",");
+  if (key === fenceKey) return;
+  fenceKey = key;
+  fencePolys = locked.flatMap((cert) => fencePolysFor(cert).map((poly) => ({ cert, poly })));
+  gridCache = null;
+}
+
+/** The certificate whose fence covers a point, if any is closed there. */
+export function fenceAt(p: Pt): CertId | null {
+  for (const fence of fencePolys) if (insidePoly(p, fence.poly)) return fence.cert;
+  return null;
+}
+
+/** On the island and outside every building, fences or not. */
+export function ground(p: Pt): boolean {
   return onLand(p) && !buildingAt(p);
+}
+
+/** Feet can stand here: on the island, outside every building and every closed fence. */
+export function walkable(p: Pt): boolean {
+  return ground(p) && !fenceAt(p);
+}
+
+export const CERT_IDS: CertId[] = CERTIFICATES.map((cert) => cert.id);
+
+/** The Certificate Center's sign and doorstep, in art pixels. */
+export const CENTER: { pin: Pt; door: Pt } = { pin: pct(CENTER_PIN[0], CENTER_PIN[1]), door: pct(CENTER_DOOR[0], CENTER_DOOR[1]) };
+
+/** Standing close enough to the Certificate Center to go in. */
+export function atCenter(pos: Pt, radius = NEAR_RADIUS): boolean {
+  return Math.hypot(CENTER.door.x - pos.x, CENTER.door.y - pos.y) <= radius;
 }
 
 /** Walker speed in art pixels per second. Crossing the island takes about five seconds. */
@@ -253,7 +303,11 @@ export const CELL = 10;
 const GW = Math.ceil(MAP_W / CELL);
 const GH = Math.ceil(MAP_H / CELL);
 let gridCache: Uint8Array | null = null;
+let groundCache: Uint8Array | null = null;
 let pavedCache: Uint8Array | null = null;
+
+/** How a search sees the island: with the closed fences, or bare ground. */
+type Mode = "walk" | "ground";
 
 function distToSegment(p: Pt, a: Pt, b: Pt): number {
   const dx = b.x - a.x;
@@ -295,20 +349,25 @@ export function onPath(p: Pt): boolean {
   return gx >= 0 && gy >= 0 && gx < GW && gy < GH && pavedGrid()[gy * GW + gx] === 1;
 }
 
+const okFor = (mode: Mode) => (mode === "ground" ? ground : walkable);
+
 /** 1 where a cell centre is walkable and not hugging a wall, so paths keep a little clearance. */
-function grid(): Uint8Array {
-  if (gridCache) return gridCache;
+function grid(mode: Mode = "walk"): Uint8Array {
+  if (mode === "walk" && gridCache) return gridCache;
+  if (mode === "ground" && groundCache) return groundCache;
+  const ok = okFor(mode);
   const g = new Uint8Array(GW * GH);
   const pad = 7;
   for (let gy = 0; gy < GH; gy++) {
     for (let gx = 0; gx < GW; gx++) {
       const x = gx * CELL + CELL / 2;
       const y = gy * CELL + CELL / 2;
-      const ok = walkable({ x, y }) && walkable({ x: x - pad, y }) && walkable({ x: x + pad, y }) && walkable({ x, y: y - pad }) && walkable({ x, y: y + pad });
-      g[gy * GW + gx] = ok ? 1 : 0;
+      const open = ok({ x, y }) && ok({ x: x - pad, y }) && ok({ x: x + pad, y }) && ok({ x, y: y - pad }) && ok({ x, y: y + pad });
+      g[gy * GW + gx] = open ? 1 : 0;
     }
   }
-  gridCache = g;
+  if (mode === "walk") gridCache = g;
+  else groundCache = g;
   return g;
 }
 
@@ -316,8 +375,8 @@ const cellOf = (p: Pt) => ({ gx: Math.max(0, Math.min(GW - 1, Math.floor(p.x / C
 const centre = (gx: number, gy: number): Pt => ({ x: gx * CELL + CELL / 2, y: gy * CELL + CELL / 2 });
 
 /** The open cell closest to a point, searching outward in rings. */
-function nearestOpenCell(p: Pt): { gx: number; gy: number } | null {
-  const g = grid();
+function nearestOpenCell(p: Pt, mode: Mode = "walk"): { gx: number; gy: number } | null {
+  const g = grid(mode);
   const c = cellOf(p);
   for (let r = 0; r < 40; r++) {
     let best: { gx: number; gy: number } | null = null;
@@ -341,13 +400,14 @@ function nearestOpenCell(p: Pt): { gx: number; gy: number } | null {
 }
 
 /** Nothing solid between two points (sampled every few pixels). */
-export function clearLine(a: Pt, b: Pt): boolean {
+export function clearLine(a: Pt, b: Pt, mode: Mode = "walk"): boolean {
+  const ok = okFor(mode);
   const dist = Math.hypot(b.x - a.x, b.y - a.y);
   const steps = Math.ceil(dist / 4);
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
     const p = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-    if (!walkable(p)) return false;
+    if (!ok(p)) return false;
   }
   return true;
 }
@@ -364,8 +424,8 @@ function pavedLine(a: Pt, b: Pt): boolean {
 }
 
 /** A shortcut keeps to the paving when the walk it replaces was on paving. */
-function goodShortcut(a: Pt, b: Pt): boolean {
-  if (!clearLine(a, b)) return false;
+function goodShortcut(a: Pt, b: Pt, mode: Mode): boolean {
+  if (!clearLine(a, b, mode)) return false;
   if (onPath(a) && onPath(b)) return pavedLine(a, b);
   return Math.hypot(b.x - a.x, b.y - a.y) < 140 || pavedLine(a, b);
 }
@@ -374,12 +434,13 @@ function goodShortcut(a: Pt, b: Pt): boolean {
  * Shortest walk from a to b around the sea and every building. Returns waypoints
  * ending at b (or the nearest reachable point to it), or [] when there is no way.
  */
-export function findPath(a: Pt, b: Pt): Pt[] {
-  if (walkable(b) && clearLine(a, b) && (Math.hypot(b.x - a.x, b.y - a.y) < 140 || pavedLine(a, b))) return [b];
-  const g = grid();
+export function findPath(a: Pt, b: Pt, mode: Mode = "walk"): Pt[] {
+  const ok = okFor(mode);
+  if (ok(b) && clearLine(a, b, mode) && (Math.hypot(b.x - a.x, b.y - a.y) < 140 || pavedLine(a, b))) return [b];
+  const g = grid(mode);
   const paved = pavedGrid();
-  const start = nearestOpenCell(a);
-  const goal = nearestOpenCell(b);
+  const start = nearestOpenCell(a, mode);
+  const goal = nearestOpenCell(b, mode);
   if (!start || !goal) return [];
   const si = start.gy * GW + start.gx;
   const gi = goal.gy * GW + goal.gx;
@@ -454,7 +515,7 @@ export function findPath(a: Pt, b: Pt): Pt[] {
   const cells: Pt[] = [];
   for (let i = gi; i !== -1; i = from[i]!) cells.push(centre(i % GW, Math.floor(i / GW)));
   cells.reverse();
-  const end = walkable(b) && clearLine(cells[cells.length - 1]!, b) ? b : cells[cells.length - 1]!;
+  const end = ok(b) && clearLine(cells[cells.length - 1]!, b, mode) ? b : cells[cells.length - 1]!;
   cells.push(end);
   // String pulling: keep only the turns the walker actually needs.
   const out: Pt[] = [];
@@ -463,7 +524,7 @@ export function findPath(a: Pt, b: Pt): Pt[] {
   while (k < cells.length) {
     let far = k;
     for (let m = cells.length - 1; m > k; m--) {
-      if (goodShortcut(anchor, cells[m]!)) {
+      if (goodShortcut(anchor, cells[m]!, mode)) {
         far = m;
         break;
       }
@@ -492,10 +553,10 @@ export function standFor(node: Pt & { id?: number }): Pt {
   if (node.id != null && standCache.has(node.id)) return standCache.get(node.id)!;
   const fixed = node.id != null ? DOOR_OVERRIDES[node.id] : undefined;
   let spot: Pt | null = fixed ? pct(fixed[0], fixed[1]) : null;
-  const g = grid();
+  const g = grid("ground");
   const open = (p: Pt) => {
     const c = cellOf(p);
-    return walkable(p) && g[c.gy * GW + c.gx] === 1;
+    return ground(p) && g[c.gy * GW + c.gx] === 1;
   };
   for (let dy = 8; dy <= 220 && !spot; dy += 4) {
     const p = { x: node.x, y: node.y + dy };
@@ -506,7 +567,7 @@ export function standFor(node: Pt & { id?: number }): Pt {
     if (!onLand(p)) break;
   }
   if (!spot) {
-    const c = nearestOpenCell(node);
+    const c = nearestOpenCell(node, "ground");
     spot = c ? centre(c.gx, c.gy) : { x: node.x, y: node.y };
   }
   if (node.id != null) standCache.set(node.id, spot);
@@ -592,7 +653,7 @@ export function roadBetween(a: number, b: number): Pt[] {
   const hit = roadCache.get(key);
   if (hit) return hit;
   const from = standFor(nodeById(a)!);
-  const path = [from, ...findPath(from, standFor(nodeById(b)!))];
+  const path = [from, ...findPath(from, standFor(nodeById(b)!), "ground")];
   roadCache.set(key, path);
   return path;
 }
@@ -646,5 +707,7 @@ export function writeRoam(patch: Partial<RoamMemory>) {
 export function spawnPoint(memory: RoamMemory | null, nextId: number): Pt {
   if (memory && walkable(memory)) return { x: memory.x, y: memory.y };
   const node = nodeById(nextId) ?? WARD_NODES[0]!;
-  return standFor(node);
+  const door = standFor(node);
+  // The next ward is behind a fence: start outside the Certificate Center instead.
+  return walkable(door) ? door : { ...CENTER.door };
 }

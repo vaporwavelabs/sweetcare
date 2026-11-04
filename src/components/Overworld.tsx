@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronLeft, Gift, Lock, Map as MapIcon, Navigation, Play, Skull, Star } from "lucide-react";
+import { ChevronLeft, Gift, Lock, Map as MapIcon, Navigation, Play, ScrollText, Skull, Star } from "lucide-react";
+import { CertIcon, CertificateCenter } from "@/components/CertificateCenter";
 import { LevelSheet } from "@/components/LevelSheet";
 import { portrait } from "@/components/Profile";
-import { sfxClick, sfxGift, unlockAudio } from "@/game/audio";
+import { playSfx, sfxClick, sfxGift, unlockAudio } from "@/game/audio";
+import { CERTIFICATES, cardsHeld, certById, lockedCerts, missingCert, nextCert, signsFor, type CertId } from "@/game/certificates";
 import { walkerLook } from "@/game/evolution";
 import { haptic } from "@/game/haptics";
 import { generateWard } from "@/game/generator";
@@ -14,7 +16,12 @@ import {
   SPURS,
   WARD_NODES,
   ZONE_NAMES,
+  CENTER,
+  atCenter,
   cameraFor,
+  fenceAt,
+  fencePolysFor,
+  setFences,
   findPath,
   nearestNode,
   pinNear,
@@ -102,9 +109,19 @@ interface Props {
   walker?: WalkerSkin;
   /** Called on each footfall while walking, for a step sound. */
   onStep?: (index: number) => void;
+  /** Hand in cards for a certificate (the caller saves it). */
+  onEarnCert?: (id: CertId) => void;
+  /** Open the Certificate Center on arrival, pointing at this certificate. */
+  certPrompt?: CertId | null;
+  onPromptSeen?: () => void;
 }
 
-export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderReveal, walker, onStep }: Props) {
+const pctPt = (x: number, y: number) => ({ x: (x / 100) * MAP_W, y: (y / 100) * MAP_H });
+
+export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderReveal, walker, onStep, onEarnCert, certPrompt, onPromptSeen }: Props) {
+  // Close the districts whose certificate is missing before anything walks or spawns.
+  const locked = lockedCerts(save);
+  setFences(locked);
   const skin = walker ?? defaultWalkerSkin(save);
   const { nextId, level: nextLevel } = useNextWard(save);
   const viewRef = useRef<HTMLDivElement>(null);
@@ -126,6 +143,26 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
   const [opening, setOpening] = useState<number | null>(null);
   const [sheet, setSheet] = useState<number | null>(null);
   const [stick, setStick] = useState<{ x: number; y: number } | null>(null);
+  const [nearCenter, setNearCenter] = useState(() => atCenter(posRef.current));
+  const [center, setCenter] = useState<{ highlight: CertId | null } | null>(() => (certPrompt ? { highlight: certPrompt } : null));
+  const [bump, setBump] = useState<{ cert: CertId; at: number } | null>(null);
+  const [falling, setFalling] = useState<CertId[]>([]);
+  const lockedKey = locked.join(",");
+  const prevLocked = useRef(locked);
+  useEffect(() => {
+    if (certPrompt) onPromptSeen?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // A fence that just opened plays its fall, then goes away.
+  useEffect(() => {
+    const opened = prevLocked.current.filter((id) => !locked.includes(id));
+    prevLocked.current = locked;
+    if (!opened.length) return;
+    setFalling((list) => [...list, ...opened]);
+    const timer = window.setTimeout(() => setFalling((list) => list.filter((id) => !opened.includes(id))), 1600);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedKey]);
   const road = useMemo(() => roadSplit(save.unlocked), [save.unlocked]);
   const reduced = typeof document !== "undefined" && document.documentElement.dataset.motion === "reduced";
 
@@ -139,6 +176,8 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
     let frame = 0;
     let lastZone: ZoneId | null = null;
     let wasMoving = false;
+    let bumpAt = -Infinity;
+    let wasNearCenter = atCenter(posRef.current);
     const tick = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
@@ -153,6 +192,15 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
       if (vx !== 0 || vy !== 0) {
         targetRef.current = null;
         pos = stepWalker(pos, vx, vy, dt);
+        if (pos.x === before.x && pos.y === before.y) {
+          // Pushing into a fence: say which certificate opens it.
+          const ahead = fenceAt({ x: pos.x + Math.sign(vx) * 12, y: pos.y + Math.sign(vy) * 12 });
+          if (ahead && now - bumpAt > 2200) {
+            bumpAt = now;
+            setBump({ cert: ahead, at: now });
+            haptic("bad");
+          }
+        }
       } else if (targetRef.current) {
         const route = targetRef.current;
         const result = stepToward(pos, route.path[0]!, dt);
@@ -211,7 +259,13 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
       } else if (skin.walk?.length && spriteRef.current && spriteRef.current.getAttribute("src") !== skin.idle) {
         spriteRef.current.src = skin.idle;
       }
-      const near = nearestNode(pos)?.id ?? null;
+      const centerHere = atCenter(pos);
+      if (centerHere !== wasNearCenter) {
+        wasNearCenter = centerHere;
+        setNearCenter(centerHere);
+        if (centerHere) haptic("tap");
+      }
+      const near = centerHere ? null : nearestNode(pos)?.id ?? null;
       if (near !== focusRef.current) {
         focusRef.current = near;
         setFocus(near);
@@ -241,6 +295,26 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
     const timer = window.setTimeout(() => setZone(null), 1800);
     return () => window.clearTimeout(timer);
   }, [zone]);
+
+  useEffect(() => {
+    if (!bump) return;
+    const timer = window.setTimeout(() => setBump(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [bump]);
+
+  function openCenter(highlight: CertId | null = null) {
+    unlockAudio();
+    playSfx("map.door");
+    keysRef.current.clear();
+    targetRef.current = null;
+    setCenter({ highlight });
+  }
+
+  function walkToCenter() {
+    unlockAudio();
+    const path = findPath(posRef.current, CENTER.door);
+    targetRef.current = path.length ? { path, node: null } : null;
+  }
 
   function enter(id: number) {
     const state = nodeState(save, id);
@@ -275,6 +349,13 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
   function walkTo(id: number) {
     const node = nodeById(id);
     if (!node) return;
+    // Fenced off: the way in starts at the Certificate Center.
+    const fenced = missingCert(save, id);
+    if (fenced) {
+      setBump({ cert: fenced.id, at: performance.now() });
+      walkToCenter();
+      return;
+    }
     unlockAudio();
     const path = findPath(posRef.current, standFor(node));
     targetRef.current = path.length ? { path, node: id } : null;
@@ -287,18 +368,19 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
       ArrowLeft: "left", KeyA: "left", ArrowRight: "right", KeyD: "right",
     };
     const down = (event: KeyboardEvent) => {
-      if (opening != null || sheet != null) return;
+      if (opening != null || sheet != null || center) return;
       const dir = map[event.code];
       if (dir) {
         keysRef.current.add(dir);
         event.preventDefault();
         return;
       }
-      if ((event.code === "Enter" || event.code === "Space" || event.code === "KeyE") && focusRef.current != null) {
+      if ((event.code === "Enter" || event.code === "Space" || event.code === "KeyE") && (focusRef.current != null || atCenter(posRef.current))) {
         const target = event.target as HTMLElement | null;
         if (target?.tagName === "BUTTON") return;
         event.preventDefault();
-        preview(focusRef.current);
+        if (focusRef.current != null) preview(focusRef.current);
+        else openCenter(nextCert(save)?.id ?? null);
       } else if (event.code === "Escape") {
         onBack();
       } else if (event.code === "KeyN") {
@@ -326,6 +408,7 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
     const cam = camRef.current;
     if (!view || !cam || event.button > 0) return;
     if ((event.target as HTMLElement).closest("button, .roam-stick, .roam-card")) return;
+    if (center) return;
     const rect = view.getBoundingClientRect();
     const at = screenToMap(event.clientX - rect.left, event.clientY - rect.top, cam);
     const node = pinNear(at, 40 / cam.scale) ?? nearestNode(at, NEAR_RADIUS * 0.8);
@@ -394,6 +477,35 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
             <polyline className="road ahead" points={road.ahead.map((p) => `${p.x},${p.y}`).join(" ")} />
             <polyline className="road walked" points={road.walked.map((p) => `${p.x},${p.y}`).join(" ")} />
           </svg>
+          <svg className="roam-fences" viewBox={`0 0 ${MAP_W} ${MAP_H}`} aria-hidden>
+            <defs>
+              <pattern id="roam-hatch" width="18" height="18" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                <rect width="18" height="18" className="hatch-bg" />
+                <rect width="7" height="18" className="hatch-stripe" />
+              </pattern>
+            </defs>
+            {[...locked, ...falling.filter((id) => !locked.includes(id))].map((id) =>
+              fencePolysFor(id).map((poly, i) => (
+                <polygon key={`${id}-${i}`} className={`roam-fence ${id}${locked.includes(id) ? "" : " falling"}`} points={poly.map((p) => `${p.x},${p.y}`).join(" ")} />
+              )),
+            )}
+          </svg>
+          {locked.flatMap((id) =>
+            signsFor(id).map(([x, y], i) => {
+              const at = pctPt(x, y);
+              return (
+                <button key={`sign-${id}-${i}`} type="button" className={`roam-sign ${id}`} style={{ left: at.x, top: at.y }} onClick={() => openCenter(id)} aria-label={`Closed: ${certById(id).name} needed. Open the Certificate Center.`}>
+                  <span className="roam-sign-board"><CertIcon id={id} /><span>{certById(id).name.replace(" certificate", "")}<small>certificate</small></span></span>
+                  <span className="roam-sign-post" aria-hidden />
+                </button>
+              );
+            }),
+          )}
+          <span className={`roam-door center${nearCenter ? " focus" : ""}`} style={{ left: CENTER.door.x, top: CENTER.door.y }} aria-hidden />
+          <button type="button" className={`roam-center${nearCenter ? " focus" : ""}${cardsHeld(save) >= (nextCert(save)?.cost ?? Infinity) ? " ready" : ""}`} style={{ left: CENTER.pin.x, top: CENTER.pin.y }} onClick={() => (nearCenter ? openCenter(nextCert(save)?.id ?? null) : walkToCenter())} aria-label="Certificate Center">
+            <span className="roam-center-face"><ScrollText aria-hidden /></span>
+            <span className="roam-center-label">Certificates</span>
+          </button>
           {WARD_NODES.map((node) => {
             const spot = standFor(node);
             const state = nodeState(save, node.id);
@@ -433,11 +545,16 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
           </div>
         </div>
 
-        {zone ? <div className="roam-zone" key={zone.at}>{ZONE_NAMES[zone.id]}</div> : null}
+        {zone && !bump ? <div className="roam-zone" key={zone.at}>{ZONE_NAMES[zone.id]}</div> : null}
+        {bump ? <div className="roam-zone roam-bump" key={`bump-${bump.at}`}><CertIcon id={bump.cert} /> {certById(bump.cert).name} needed</div> : null}
 
         <div className="roam-hud">
           <button type="button" className="roam-chip" onClick={() => { sfxClick(); walkTo(nextId); }}>
-            <Navigation aria-hidden /> Next ward
+            <Navigation aria-hidden /> {missingCert(save, nextId) ? "Certificates" : "Next ward"}
+          </button>
+          <button type="button" className="roam-chip cards" onClick={() => { sfxClick(); openCenter(nextCert(save)?.id ?? null); }} aria-label={`${cardsHeld(save)} cards in hand. Certificates: ${CERTIFICATES.filter((c) => !locked.includes(c.id)).length} of 3`}>
+            <span className="roam-card-icon" aria-hidden /> {cardsHeld(save)}
+            <span className="roam-cert-dots" aria-hidden>{CERTIFICATES.map((c) => <i key={c.id} className={locked.includes(c.id) ? "" : "on"} />)}</span>
           </button>
           <button type="button" className="roam-chip ghost" onClick={() => { sfxClick(); onClassic(); }}>
             <MapIcon aria-hidden /> Classic map
@@ -454,6 +571,30 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
         >
           <span className="roam-knob" style={stick ? { transform: `translate(${stick.x * 38}px, ${stick.y * 38}px)` } : undefined} />
         </div>
+
+        {nearCenter && !center ? (
+          <div className={`roam-card center${moving ? " passing" : ""}`} role="dialog" aria-label="Certificate Center">
+            <div className="roam-card-top">
+              <span className="roam-kicker">Hospital plaza</span>
+            </div>
+            <h3>Certificate Center</h3>
+            <p className="roam-card-note">
+              {(() => {
+                const want = nextCert(save);
+                const held = cardsHeld(save);
+                if (!want) return "All three certificates earned. Every path is open.";
+                return held >= want.cost
+                  ? `You have ${held} card${held === 1 ? "" : "s"}. Enough for the ${want.name}.`
+                  : `You have ${held} card${held === 1 ? "" : "s"}. The ${want.name} needs ${want.cost}.`;
+              })()}
+            </p>
+            <div className="roam-card-actions">
+              <button type="button" className="btn" onClick={() => openCenter(nextCert(save)?.id ?? null)}>
+                <ScrollText aria-hidden /> Go in
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         {focusNode && focusState && focusLevel ? (
           <div className={`roam-card ${focusNode.kind}${focusState.locked ? " locked" : ""}${moving ? " passing" : ""}`} role="dialog" aria-label={focusLevel.name}>
@@ -487,6 +628,11 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
                   <Gift aria-hidden /> Gift
                 </button>
               ) : null}
+              {missingCert(save, focusNode.id) ? (
+                <button type="button" className="btn secondary" onClick={() => openCenter(missingCert(save, focusNode.id)!.id)}>
+                  <ScrollText aria-hidden /> Certificates
+                </button>
+              ) : null}
               <button type="button" className="btn" disabled={focusState.locked} onClick={() => preview(focusNode.id)}>
                 {focusState.locked ? <><Lock aria-hidden /> Locked</> : <><Play aria-hidden /> {focusState.cleared ? "Replay" : "Start"}</>}
               </button>
@@ -495,6 +641,17 @@ export function Overworld({ save, onBack, onPick, onCollect, onClassic, renderRe
         ) : null}
       </div>
       {opening != null && renderReveal ? renderReveal(opening, () => setOpening(null)) : null}
+      {center ? (
+        <CertificateCenter
+          save={save}
+          highlight={center.highlight}
+          onEarn={(id) => onEarnCert?.(id)}
+          onClose={() => {
+            sfxClick();
+            setCenter(null);
+          }}
+        />
+      ) : null}
       {sheet != null ? (
         <LevelSheet
           levelId={sheet}

@@ -64,9 +64,11 @@ describe("nodeState", () => {
     assert.equal(nodeState({ unlocked: 6, stars: { "5": 1 } }, 19).locked, false);
   });
 
-  it("keeps bonus stages open like the classic map", () => {
-    assert.equal(nodeState(fresh, 26).locked, false);
-    assert.equal(nodeState(fresh, 30).locked, false);
+  it("keeps bonus stages behind the Wound Care certificate", () => {
+    assert.equal(nodeState(fresh, 26).locked, true);
+    assert.match(nodeState(fresh, 30).reason ?? "", /Wound Care/);
+    assert.equal(nodeState({ ...fresh, certs: ["clinic", "peds", "wound"] }, 26).locked, false);
+    assert.equal(nodeState({ ...fresh, certs: ["clinic", "peds", "wound"] }, 30).locked, false);
   });
 
   it("flags a waiting gift until it is opened", () => {
