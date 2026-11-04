@@ -216,6 +216,8 @@ interface Model {
   pausedAt: number;
   /** Seconds left of the red hit flash on the stage. */
   sting: number;
+  /** The latest hit on the player, keyed so the red flash and the damage number replay on every hit. */
+  hit: { id: number; label: string } | null;
   playerHp: number;
   germs: Germ[];
   germLeft: number;
@@ -748,6 +750,10 @@ export function SweetCare() {
   }
 
   function startLevel(id: number, custom?: LevelDef) {
+    if ((custom ?? getLevel(id)).bossHp) {
+      const sheet = new Image();
+      sheet.src = KAREN_SHEET;
+    }
     const story = custom ? null : sceneBefore(id);
     if (story && !hasSeen(story)) {
       withScene(story, () => startLevel(id, custom));
@@ -836,6 +842,7 @@ export function SweetCare() {
       paused: false,
       pausedAt: 0,
       sting: 0,
+      hit: null,
       playerHp: 100,
       germs: [],
       germLeft: level.swarm?.count ?? 0,
@@ -1094,9 +1101,8 @@ export function SweetCare() {
       return;
     }
     if (event.type === "contact") {
-      model.playerHp = Math.max(0, model.playerHp - event.bite);
+      hurtPlayer(model, event.bite);
       model.marked = [];
-      model.sting = 0.5;
       model.shake = true;
       say(model, "She grabbed the chart!");
       sfxBad();
@@ -1130,9 +1136,11 @@ export function SweetCare() {
       const taken = Math.min(event.power, Math.max(0, model.moves - 1));
       model.moves -= taken;
       model.sting = 0.45;
+      model.hit = { id: (model.hit?.id ?? 0) + 1, label: taken > 0 ? `-${taken} move${taken > 1 ? "s" : ""}` : "Write-up" };
       say(model, taken > 0 ? `Write-up! -${taken} move${taken > 1 ? "s" : ""}` : "Write-up!");
     } else if (event.move === "charge") {
       model.sting = 0.35;
+      model.hit = { id: (model.hit?.id ?? 0) + 1, label: "Charge!" };
       say(model, "She charged!");
     }
   }
@@ -1444,10 +1452,9 @@ export function SweetCare() {
       for (const germ of [...model.germs]) {
         if (!stepGerm(germ, swarm, dt)) continue;
         const bite = germ.kind === "mother" ? swarm.bite * 2 : swarm.bite;
-        model.playerHp = Math.max(0, model.playerHp - bite);
+        hurtPlayer(model, bite, 0.4);
         model.germs = model.germs.filter((item) => item.id !== germ.id);
         say(model, "A microbe reached the ward");
-        model.sting = 0.4;
         sfxBad();
         haptic("hurt");
         if (model.playerHp <= 0) {
@@ -1476,8 +1483,7 @@ export function SweetCare() {
 
   function applyEmergencyEvent(model: Model, event: EmergencyEvent) {
     if (event.type === "flatline") {
-      model.playerHp = Math.max(0, model.playerHp - event.bite);
-      model.sting = 0.5;
+      hurtPlayer(model, event.bite);
       say(model, "Flatline! Get those hearts in");
       sfxBad();
       haptic("hurt");
@@ -1508,8 +1514,7 @@ export function SweetCare() {
     for (const cell of floodCells(model.jelly, model.mask, 2 + model.boss.phase, model.rng)) model.jelly[cell.r]![cell.c] = true;
     if (floodLevel(model.jelly, model.mask) >= SPILL_AT) {
       drainFlood(model.jelly, model.rng);
-      model.playerHp = Math.max(0, model.playerHp - SPILL_BITE);
-      model.sting = 0.5;
+      hurtPlayer(model, SPILL_BITE);
       say(model, "It spilled over!");
       sfxBad();
       haptic("hurt");
@@ -2564,8 +2569,9 @@ function Play({
   const boardH = Math.round(side * rows / cols);
   const lifePct = Math.max(0, Math.min(100, model.playerHp));
   const lifeBar = (
-    <div className={`vital life${lifePct <= 30 ? " low" : ""}`}>
+    <div className={`vital life${lifePct <= 30 ? " low" : ""}${model.sting > 0 ? " hit" : ""}`}>
       <span className="vital-tag">You</span>
+      {model.hit && model.sting > 0 ? <i key={model.hit.id} className="hit-pop" aria-hidden>{model.hit.label}</i> : null}
       <div className="vital-bar" role="meter" aria-label="Your life" aria-valuenow={Math.ceil(lifePct)} aria-valuemin={0} aria-valuemax={100}>
         <span style={{ width: `${lifePct}%` }} />
       </div>
@@ -2641,6 +2647,7 @@ function Play({
   );
   return (
     <div className={`column play${arena ? " boss-play" : ""}${model.outcome && model.curtain === "done" ? (model.outcome === "win" ? " slowmo" : " slowmo lost") : ""}`}>
+      {model.hit ? <span key={model.hit.id} className={`hurt-flash${lifePctFor(model) <= 30 ? " critical" : ""}`} aria-hidden /> : null}
       <div className="crush-nav">
         <span className="nav-side">
           {model.outcome ? (
@@ -2706,9 +2713,9 @@ function Play({
           <>
             <span className="danger-glow" aria-hidden style={{ opacity: Math.max(0, (boss.near - 55) / 45) }} />
             {boss.action?.move === "charge" ? (
-              <span className="charge-lane" aria-hidden style={{ left: `${12 + boss.lane * 76}%`, top: `${boss.near * 0.58}%`, ["--wind" as string]: String(windupProgress(boss)) }} />
+              <span className="charge-lane" aria-hidden style={{ left: `${karenLeft(boss.lane)}%`, top: `${karenTop(boss.near)}%`, ["--wind" as string]: String(windupProgress(boss)) }} />
             ) : null}
-            <span ref={bossRef} className={["karen-walk", boss.hot > 0 ? "hot" : "", boss.slow > 0 ? "hurt" : "", boss.action ? `winding ${boss.action.move}` : "", boss.guard > 0 ? "guard" : "", `phase-${boss.phase}`, boss.hp <= 0 ? "down" : ""].filter(Boolean).join(" ")} style={{ left: `${12 + boss.lane * 76}%`, top: `${boss.near * 0.58}%`, ["--depth" as string]: String(0.86 + boss.near * 0.0026) }}>
+            <span ref={bossRef} className={["karen-walk", boss.hot > 0 ? "hot" : "", boss.slow > 0 ? "hurt" : "", boss.action ? `winding ${boss.action.move}` : "", boss.guard > 0 ? "guard" : "", `phase-${boss.phase}`, boss.hp <= 0 ? "down" : ""].filter(Boolean).join(" ")} style={{ left: `${karenLeft(boss.lane)}%`, top: `${karenTop(boss.near)}%`, ["--depth" as string]: String(0.86 + boss.near * 0.0026) }}>
               {boss.action ? (
                 <span className={`intent ${boss.action.move}`} role="status" style={{ ["--wind" as string]: String(windupProgress(boss)) }}>
                   <i aria-hidden />
@@ -2794,111 +2801,74 @@ function Play({
   );
 }
 
+/** Takes life from the player and arms the red screen flash plus the floating damage number. */
+function lifePctFor(model: Model) {
+  return Math.max(0, Math.min(100, model.playerHp));
+}
+
+function hurtPlayer(model: Model, amount: number, sting = 0.5) {
+  model.playerHp = Math.max(0, model.playerHp - amount);
+  model.sting = Math.max(model.sting, sting);
+  model.hit = { id: (model.hit?.id ?? 0) + 1, label: `-${Math.round(amount)}` };
+}
+
+/** Karen paces the open aisle between the desk arms (not on top of them) and walks down toward the board. */
+function karenLeft(lane: number) {
+  return 28 + lane * 44;
+}
+
+function karenTop(near: number) {
+  return 5 + near * 0.53;
+}
+
+const KAREN_SHEET = "/sprites/karen-walk-sheet.webp";
+const KAREN_FRAMES = 73;
+const KAREN_COLS = 12;
+const KAREN_ROWS = 7;
+
+/**
+ * Karen's walk cycle, pre-keyed into a transparent sprite sheet (12x7, 73 frames).
+ * The old version chroma-keyed an mp4 every frame, which flickered, ate her sneakers,
+ * resized her mid-stride and stayed blank on iPhone, where a detached video never decodes.
+ */
 function KarenWalk({ slow, facing, paused }: { slow: boolean; facing: number; paused: boolean }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const spriteRef = useRef<HTMLSpanElement | null>(null);
   const slowRef = useRef(slow);
   const pausedRef = useRef(paused);
   slowRef.current = slow;
   pausedRef.current = paused;
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const video = document.createElement("video");
-    video.src = "/sprites/karen-walk.mp4";
-    video.loop = true;
-    video.muted = true;
-    video.playsInline = true;
-    void video.play().catch(() => {});
-    const scratch = document.createElement("canvas");
-    const sctx = scratch.getContext("2d", { willReadFrequently: true });
-    const ctx = canvas.getContext("2d");
+    const el = spriteRef.current;
+    if (!el) return;
     let raf = 0;
-    let alive = true;
-    let box: { w: number; h: number } | null = null;
-    const paint = () => {
-      if (!alive) return;
-      raf = requestAnimationFrame(paint);
-      if (!sctx || !ctx || video.readyState < 2 || !video.videoWidth) return;
-      if (reducedMotion() || pausedRef.current) video.pause();
-      else if (video.paused) void video.play().catch(() => {});
-      video.playbackRate = slowRef.current ? 0.22 : 0.55;
-      const w = 240;
-      const h = Math.max(1, Math.round(video.videoHeight * (w / video.videoWidth)));
-      if (scratch.width !== w || scratch.height !== h) {
-        scratch.width = w;
-        scratch.height = h;
-      }
-      sctx.drawImage(video, 0, 0, w, h);
-      const img = sctx.getImageData(0, 0, w, h);
-      const data = img.data;
-      const seen = new Uint8Array(w * h);
-      const stack: number[] = [];
-      const backdrop = (index: number) => {
-        const r = data[index] ?? 0;
-        const g = data[index + 1] ?? 0;
-        const b = data[index + 2] ?? 0;
-        const max = Math.max(r, g, b);
-        const min = Math.min(r, g, b);
-        return max - min < 28 && max > 128 && max < 222;
-      };
-      for (let x = 0; x < w; x++) stack.push(x, (h - 1) * w + x);
-      for (let y = 0; y < h; y++) stack.push(y * w, y * w + w - 1);
-      while (stack.length > 0) {
-        const p = stack.pop()!;
-        if (seen[p]) continue;
-        seen[p] = 1;
-        const index = p * 4;
-        if (!backdrop(index)) continue;
-        data[index + 3] = 0;
-        const x = p % w;
-        const y = (p / w) | 0;
-        if (x > 0) stack.push(p - 1);
-        if (x + 1 < w) stack.push(p + 1);
-        if (y > 0) stack.push(p - w);
-        if (y + 1 < h) stack.push(p + w);
-      }
-      sctx.putImageData(img, 0, 0);
-      let minX = w;
-      let minY = h;
-      let maxX = 0;
-      let maxY = 0;
-      for (let y = 0; y < h; y++) {
-        for (let x = 0; x < w; x++) {
-          if ((data[(y * w + x) * 4 + 3] ?? 0) > 18) {
-            if (x < minX) minX = x;
-            if (y < minY) minY = y;
-            if (x > maxX) maxX = x;
-            if (y > maxY) maxY = y;
-          }
-        }
-      }
-      if (maxX <= minX || maxY <= minY) return;
-      // Keep her scale steady mid-stride: the crop follows her center but its size only ever grows.
-      const span = Math.max(maxX - minX + 1, box?.w ?? 0);
-      const tall = Math.max(maxY - minY + 1, box?.h ?? 0);
-      box = { w: span, h: tall };
-      const mid = (minX + maxX) / 2;
-      minX = Math.max(0, Math.round(mid - span / 2));
-      maxX = Math.min(w - 1, minX + span - 1);
-      minY = Math.max(0, maxY - tall + 1);
-      const cw = maxX - minX + 1;
-      const ch = maxY - minY + 1;
-      if (canvas.width !== cw || canvas.height !== ch) {
-        canvas.width = cw;
-        canvas.height = ch;
-      }
-      ctx.clearRect(0, 0, cw, ch);
-      ctx.drawImage(scratch, minX, minY, cw, ch, 0, 0, cw, ch);
+    let frame = 0;
+    let acc = 0;
+    let last = performance.now();
+    const place = () => {
+      const col = frame % KAREN_COLS;
+      const row = Math.floor(frame / KAREN_COLS);
+      el.style.backgroundPosition = `${(col / (KAREN_COLS - 1)) * 100}% ${(row / (KAREN_ROWS - 1)) * 100}%`;
     };
-    raf = requestAnimationFrame(paint);
-    return () => {
-      alive = false;
-      cancelAnimationFrame(raf);
-      video.pause();
-      video.src = "";
+    place();
+    const tick = (now: number) => {
+      raf = requestAnimationFrame(tick);
+      const dt = Math.min(0.25, (now - last) / 1000);
+      last = now;
+      if (pausedRef.current || reducedMotion()) return;
+      acc += dt * (slowRef.current ? 2.8 : 6.6);
+      if (acc < 1) return;
+      frame = (frame + Math.floor(acc)) % KAREN_FRAMES;
+      acc %= 1;
+      place();
     };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, []);
-  return <canvas ref={canvasRef} className="karen-clip" style={{ transform: `scaleX(${facing})` }} />;
+  return (
+    <span className="karen-clip" style={{ transform: `scaleX(${facing < 0 ? -1 : 1})` }}>
+      <span ref={spriteRef} className="karen-sprite" />
+    </span>
+  );
 }
 
 const CONFETTI_COLORS = ["#ffe56a", "#ff4ea8", "#fff7fb", "#b8f2c2", "#7a5cff", "#ff335c"];

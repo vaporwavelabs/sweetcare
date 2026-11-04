@@ -430,6 +430,101 @@
   transform-origin: 50% 70%;
 }
 
+.karen-sprite {
+  display: block;
+  width: 100%;
+  aspect-ratio: 180 / 240;
+  background: url("/sprites/karen-walk-sheet.webp") 0 0 / 1200% 700% no-repeat;
+  animation: karenEnter 0.75s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+/* She steps in through the ward doors instead of popping in. */
+@keyframes karenEnter {
+  0% { opacity: 0; transform: translateY(-18%) scale(0.72); filter: blur(3px); }
+  60% { opacity: 1; filter: none; }
+  100% { opacity: 1; transform: none; }
+}
+
+/* Damage to the player: the whole screen flashes red from the edges, and the life bar shakes and shows the hit. */
+.hurt-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at center, transparent 42%, rgba(255, 20, 60, 0.55) 100%),
+    rgba(255, 30, 70, 0.22);
+  animation: hurtFlash 0.6s ease-out forwards;
+}
+
+.hurt-flash.critical {
+  animation: hurtFlash 0.85s ease-out forwards;
+  background:
+    radial-gradient(ellipse at center, transparent 30%, rgba(220, 0, 40, 0.7) 100%),
+    rgba(255, 20, 50, 0.32);
+}
+
+@keyframes hurtFlash {
+  0% { opacity: 0; }
+  12% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+.vital.life {
+  position: relative;
+}
+
+.vital.life.hit .vital-bar {
+  animation: lifeHit 0.4s linear;
+  box-shadow: 0 0 0.5rem rgba(255, 45, 85, 0.95);
+}
+
+@keyframes lifeHit {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(2px); }
+}
+
+.hit-pop {
+  position: absolute;
+  right: 2.4rem;
+  top: -0.2rem;
+  z-index: 2;
+  padding: 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: #ff2d55;
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 2px 0 #b3002f;
+  pointer-events: none;
+  animation: hitPop 0.9s ease-out forwards;
+}
+
+@keyframes hitPop {
+  0% { opacity: 0; transform: translateY(4px) scale(0.6); }
+  18% { opacity: 1; transform: translateY(-2px) scale(1.15); }
+  70% { opacity: 1; transform: translateY(-6px) scale(1); }
+  100% { opacity: 0; transform: translateY(-12px) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .karen-sprite,
+  .vital.life.hit .vital-bar {
+    animation: none;
+  }
+  .hurt-flash,
+  .hurt-flash.critical {
+    animation: hurtFlash 0.6s step-end forwards;
+  }
+}
+
 .objectives {
   position: absolute;
   z-index: 4;
