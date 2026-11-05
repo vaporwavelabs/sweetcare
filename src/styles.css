@@ -1267,7 +1267,16 @@
   width: 100%;
   height: 100%;
   overflow: hidden;
+  /* clip, not hidden: a hidden box is still a scroll container, and iOS Safari scrolled it
+     mid-fight, sliding every piece up off its cell. A clipped box can never scroll. */
+  overflow: clip;
+  overscroll-behavior: none;
   touch-action: none;
+  /* A press that turned into a native drag or callout cancelled the pointer and ate the swap. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
   background: transparent;
 }
 

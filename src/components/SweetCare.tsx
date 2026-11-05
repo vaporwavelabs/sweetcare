@@ -521,6 +521,19 @@ export function SweetCare() {
     setCell(board.clientWidth / (modelRef.current?.level.cols ?? COLS));
   }, [screen, side, tick]);
 
+  // Older iOS Safari has no overflow: clip and can still scroll the hidden board box, which shifts every
+  // piece off its cell. Pin any board at the origin whenever something scrolls it (scroll doesn't bubble, so capture).
+  useEffect(() => {
+    const pin = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement) || !target.classList.contains("board")) return;
+      if (target.scrollTop !== 0) target.scrollTop = 0;
+      if (target.scrollLeft !== 0) target.scrollLeft = 0;
+    };
+    document.addEventListener("scroll", pin, { capture: true, passive: true });
+    return () => document.removeEventListener("scroll", pin, { capture: true });
+  }, []);
+
   function clearHint() {
     if (hintRef.current) window.clearTimeout(hintRef.current);
     hintRef.current = null;
@@ -2685,7 +2698,7 @@ function Play({
     <>
       <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} holes={model.mask} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
       <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}${model.perks.armed ? " bedside" : ""}${aiming ? ` aiming aim-${model.phase === "aim-blast" ? "blast" : "pill"}` : ""}`} style={{ width: side, height: boardH }}>
-        <div className="board" ref={boardRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
+        <div className="board" ref={boardRef} onDragStart={(event) => event.preventDefault()} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
           <div className={`pieces${model.animate ? " anim" : ""}`}>
             {model.view.map((tile) => {
               const selected = model.selected?.r === tile.r && model.selected?.c === tile.c;
