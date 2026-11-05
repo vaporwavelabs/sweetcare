@@ -38,6 +38,7 @@ export const SFX_NAMES = [
   "perk.bedside",
   "perk.miracle",
   "perk.bonus",
+  "hit.punch",
   "power.arm",
   "power.blast",
   "power.pill",
@@ -254,6 +255,15 @@ const CUES: Record<SfxName, Cue> = {
   "cut.sparkle": (d) => {
     [2093, 2637, 3136, 2637, 3520].forEach((f, i) => tone(f, 0.12, 0.025, { when: d + i * 0.05 }));
   },
+  // A meaty body blow for orbs landing on Karen, the other bosses and the lead germ.
+  // `index` counts the hits in a volley and drops the pitch a touch so a run of them reads as a flurry.
+  "hit.punch": (d, i) => {
+    const drop = 1 - (i % 4) * 0.05;
+    tone(150 * drop, 0.2, 0.24, { when: d, slideTo: 42, attack: 0.003 });
+    tone(320 * drop, 0.07, 0.1, { when: d, type: tri, slideTo: 90, attack: 0.002 });
+    noise(0.08, 0.1, { when: d, filter: "lowpass", freq: 1800, sweepTo: 280, attack: 0.002 });
+    noise(0.018, 0.05, { when: d, filter: "highpass", freq: 3200, attack: 0.001 });
+  },
   "cut.thud": (d) => {
     tone(100, 0.2, 0.15, { when: d, slideTo: 40 });
     noise(0.1, 0.06, { when: d, filter: "lowpass", freq: 600 });
@@ -269,7 +279,7 @@ const CUES: Record<SfxName, Cue> = {
 };
 
 /** Shortest gap between two plays of one cue, in ms. Stops rapid UI taps from stacking. */
-const MIN_GAP: Partial<Record<SfxName, number>> = { "ui.tap": 40, "cut.blip": 35, "map.step": 90, "reward.tick": 30 };
+const MIN_GAP: Partial<Record<SfxName, number>> = { "ui.tap": 40, "cut.blip": 35, "map.step": 90, "reward.tick": 30, "hit.punch": 70 };
 const lastAt = new Map<SfxName, number>();
 
 export function isSfxName(value: string): value is SfxName {

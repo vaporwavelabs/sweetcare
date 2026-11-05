@@ -1265,6 +1265,7 @@ export function SweetCare() {
           woundBoss(current, damage, bigHit && landed === 1);
           shoveBoss(current, landed % 3 === 0);
           sfxOrbPop();
+          playSfx("hit.punch", { index: landed, gain: bigHit && landed === 1 ? 1.4 : 1 });
         });
       }
     }
@@ -1287,11 +1288,13 @@ export function SweetCare() {
       if (hits.length === 0 || reducedMotion() || !particleRef.current) hurtGerm(model, hits.length * 4);
       else {
         sfxOrbFly();
+        let punches = 0;
         particleRef.current.bossFly(hits, 4, (damage) => {
           const current = modelRef.current;
           if (!current || current.outcome) return;
           hurtGerm(current, damage);
           sfxOrbPop();
+          playSfx("hit.punch", { index: (punches += 1), gain: 0.85 });
         });
       }
     }
