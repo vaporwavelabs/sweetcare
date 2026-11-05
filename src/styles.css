@@ -1272,6 +1272,11 @@
   overflow: clip;
   overscroll-behavior: none;
   touch-action: none;
+  /* A press that turned into a native drag or callout cancelled the pointer and ate the swap. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
   background: transparent;
 }
 

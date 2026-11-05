@@ -2698,7 +2698,7 @@ function Play({
     <>
       <LiquidBoard rows={rows} cols={cols} jelly={model.jelly} holes={model.mask} revision={model.score + model.moves + countJelly(model.jelly)} scene={scene} frame={arena ? { x: 0, y: 0, w: 1, h: 1 } : frame} apiRef={liquidRef} />
       <div className={`board-shell${model.shake ? " shake" : ""}${arena ? " icon-panel footer-grid" : ""}${arena && model.sting > 0 ? " contact" : ""}${model.perks.armed ? " bedside" : ""}${aiming ? ` aiming aim-${model.phase === "aim-blast" ? "blast" : "pill"}` : ""}`} style={{ width: side, height: boardH }}>
-        <div className="board" ref={boardRef} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
+        <div className="board" ref={boardRef} onDragStart={(event) => event.preventDefault()} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} role="application" aria-label={`${model.level.name} board`}>
           <div className={`pieces${model.animate ? " anim" : ""}`}>
             {model.view.map((tile) => {
               const selected = model.selected?.r === tile.r && model.selected?.c === tile.c;
